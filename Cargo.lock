@@ -7,8 +7,8 @@ name = "add_sub_lui_auipc_mop"
 version = "0.1.0"
 dependencies = [
  "circuit_common",
- "common_constants 0.1.0",
- "prover 0.1.0",
+ "common_constants",
+ "prover",
  "witness_eval_generator",
 ]
 
@@ -86,7 +86,7 @@ dependencies = [
  "ark-std 0.5.0",
  "blake2",
  "cfg-if",
- "common_constants 0.1.0",
+ "common_constants",
  "const_for",
  "educe",
  "itertools 0.14.0",
@@ -109,10 +109,10 @@ version = "0.3.0"
 dependencies = [
  "airbender-codec",
  "airbender-core",
- "field 0.1.0",
+ "field",
  "prover_pipeline",
  "riscv_common",
- "riscv_transpiler 0.1.0",
+ "riscv_transpiler",
  "serde",
  "sha2",
  "sha3 0.10.8",
@@ -1564,8 +1564,8 @@ name = "bigint_with_control"
 version = "0.1.0"
 dependencies = [
  "circuit_common",
- "common_constants 0.1.0",
- "prover 0.1.0",
+ "common_constants",
+ "prover",
  "witness_eval_generator",
 ]
 
@@ -1652,8 +1652,8 @@ name = "blake2_g_function"
 version = "0.1.0"
 dependencies = [
  "circuit_common",
- "common_constants 0.1.0",
- "prover 0.1.0",
+ "common_constants",
+ "prover",
  "witness_eval_generator",
 ]
 
@@ -1662,34 +1662,16 @@ name = "blake2_with_compression"
 version = "0.1.0"
 dependencies = [
  "circuit_common",
- "common_constants 0.1.0",
- "prover 0.1.0",
+ "common_constants",
+ "prover",
  "witness_eval_generator",
 ]
 
 [[package]]
-name = "blake2_with_compression_verifier"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99#73d69b5346b3c2350fa104a56ec4df78840cea99"
-dependencies = [
- "field 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "unroll",
- "verifier_common 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
-]
-
-[[package]]
 name = "blake2s_u32"
 version = "0.1.0"
 dependencies = [
- "common_constants 0.1.0",
- "unroll",
-]
-
-[[package]]
-name = "blake2s_u32"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99#73d69b5346b3c2350fa104a56ec4df78840cea99"
-dependencies = [
+ "common_constants",
  "unroll",
 ]
 
@@ -1872,14 +1854,14 @@ dependencies = [
 name = "circuit_common"
 version = "0.1.0"
 dependencies = [
- "common_constants 0.1.0",
- "cs 0.1.0",
- "fft 0.1.0",
- "field 0.1.0",
+ "common_constants",
+ "cs",
+ "fft",
+ "field",
  "serde",
  "serde_json",
  "witness_eval_generator",
- "worker 0.1.0",
+ "worker",
 ]
 
 [[package]]
@@ -1953,14 +1935,6 @@ version = "0.1.0"
 dependencies = [
  "seq-macro",
  "serde",
-]
-
-[[package]]
-name = "common_constants"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99#73d69b5346b3c2350fa104a56ec4df78840cea99"
-dependencies = [
- "seq-macro",
 ]
 
 [[package]]
@@ -2072,16 +2046,16 @@ name = "cpu_execution_prover"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
- "cs 0.1.0",
+ "cs",
  "execution_prover",
  "execution_prover_model",
- "fft 0.1.0",
- "field 0.1.0",
- "prover 0.1.0",
- "riscv_transpiler 0.1.0",
+ "fft",
+ "field",
+ "prover",
+ "riscv_transpiler",
  "setups",
  "trace_and_split",
- "worker 0.1.0",
+ "worker",
 ]
 
 [[package]]
@@ -2203,42 +2177,20 @@ version = "0.1.0"
 dependencies = [
  "arrayvec",
  "bincode 1.3.3",
- "blake2s_u32 0.1.0",
- "common_constants 0.1.0",
- "fft 0.1.0",
- "field 0.1.0",
+ "blake2s_u32",
+ "common_constants",
+ "fft",
+ "field",
  "itertools 0.14.0",
  "layout-rs",
  "proc-macro2",
  "quote",
  "rayon",
- "riscv_transpiler 0.1.0",
+ "riscv_transpiler",
  "seq-macro",
  "serde",
  "serde_json",
  "serde_with",
- "smallvec",
- "type-map",
-]
-
-[[package]]
-name = "cs"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99#73d69b5346b3c2350fa104a56ec4df78840cea99"
-dependencies = [
- "bincode 1.3.3",
- "blake2s_u32 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "common_constants 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "derivative",
- "fft 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "field 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "itertools 0.14.0",
- "proc-macro2",
- "quote",
- "rayon",
- "seq-macro",
- "serde",
- "serde_json",
  "smallvec",
  "type-map",
 ]
@@ -2707,7 +2659,7 @@ dependencies = [
  "clap",
  "flate2",
  "forward_system",
- "full_statement_verifier 0.1.0",
+ "full_statement_verifier",
  "futures",
  "oracle_provider",
  "prover_pipeline",
@@ -2794,21 +2746,21 @@ dependencies = [
 name = "execution_prover"
 version = "0.1.0"
 dependencies = [
- "common_constants 0.1.0",
+ "common_constants",
  "crossbeam-channel",
- "cs 0.1.0",
+ "cs",
  "execution_prover_model",
- "fft 0.1.0",
- "field 0.1.0",
+ "fft",
+ "field",
  "itertools 0.14.0",
  "log",
- "prover 0.1.0",
- "riscv_transpiler 0.1.0",
+ "prover",
+ "riscv_transpiler",
  "setups",
  "trace_and_split",
  "type-map",
- "verifier_common 0.1.0",
- "worker 0.1.0",
+ "verifier_common",
+ "worker",
 ]
 
 [[package]]
@@ -2816,10 +2768,10 @@ name = "execution_prover_model"
 version = "0.1.0"
 dependencies = [
  "circuit_common",
- "common_constants 0.1.0",
- "fft 0.1.0",
- "field 0.1.0",
- "riscv_transpiler 0.1.0",
+ "common_constants",
+ "fft",
+ "field",
+ "riscv_transpiler",
  "setups",
 ]
 
@@ -2871,43 +2823,20 @@ dependencies = [
 name = "fft"
 version = "0.1.0"
 dependencies = [
- "field 0.1.0",
+ "field",
  "seq-macro",
  "type-map",
  "unroll",
- "worker 0.1.0",
-]
-
-[[package]]
-name = "fft"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99#73d69b5346b3c2350fa104a56ec4df78840cea99"
-dependencies = [
- "field 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "seq-macro",
- "trace_holder",
- "type-map",
- "unroll",
- "worker 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
+ "worker",
 ]
 
 [[package]]
 name = "field"
 version = "0.1.0"
 dependencies = [
- "common_constants 0.1.0",
+ "common_constants",
  "proc-macro2",
  "quote",
- "rand 0.9.2",
- "seq-macro",
- "serde",
-]
-
-[[package]]
-name = "field"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99#73d69b5346b3c2350fa104a56ec4df78840cea99"
-dependencies = [
  "rand 0.9.2",
  "seq-macro",
  "serde",
@@ -3021,21 +2950,10 @@ checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 name = "full_statement_verifier"
 version = "0.1.0"
 dependencies = [
- "common_constants 0.1.0",
+ "common_constants",
  "serde",
  "setups",
- "verifier_common 0.1.0",
-]
-
-[[package]]
-name = "full_statement_verifier"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99#73d69b5346b3c2350fa104a56ec4df78840cea99"
-dependencies = [
- "blake2_with_compression_verifier",
- "common_constants 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "unified_reduced_machine_verifier",
- "verifier_common 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
+ "verifier_common",
 ]
 
 [[package]]
@@ -3202,8 +3120,8 @@ dependencies = [
 name = "gkr_eval_ir"
 version = "0.1.0"
 dependencies = [
- "cs 0.1.0",
- "field 0.1.0",
+ "cs",
+ "field",
  "serde",
 ]
 
@@ -3217,12 +3135,12 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 name = "gpu_circuit_prover"
 version = "0.1.0"
 dependencies = [
- "blake2s_u32 0.1.0",
- "cs 0.1.0",
+ "blake2s_u32",
+ "cs",
  "era_cudart",
  "era_cudart_sys",
- "fft 0.1.0",
- "field 0.1.0",
+ "fft",
+ "field",
  "gpu_core",
  "gpu_gkr",
  "gpu_hash",
@@ -3230,7 +3148,7 @@ dependencies = [
  "gpu_prover_context",
  "gpu_trace",
  "gpu_whir",
- "prover 0.1.0",
+ "prover",
 ]
 
 [[package]]
@@ -3238,11 +3156,11 @@ name = "gpu_core"
 version = "0.1.0"
 dependencies = [
  "cc",
- "cs 0.1.0",
+ "cs",
  "era_cudart",
  "era_cudart_sys",
- "fft 0.1.0",
- "field 0.1.0",
+ "fft",
+ "field",
  "gpu_native_build",
  "itertools 0.14.0",
  "log",
@@ -3252,16 +3170,16 @@ dependencies = [
 name = "gpu_execution_prover"
 version = "0.1.0"
 dependencies = [
- "common_constants 0.1.0",
+ "common_constants",
  "crossbeam-channel",
  "crossbeam-utils",
- "cs 0.1.0",
+ "cs",
  "era_cudart",
  "era_cudart_sys",
  "execution_prover",
  "execution_prover_model",
- "fft 0.1.0",
- "field 0.1.0",
+ "fft",
+ "field",
  "gpu_circuit_prover",
  "gpu_core",
  "gpu_gkr",
@@ -3269,21 +3187,21 @@ dependencies = [
  "gpu_trace",
  "itertools 0.14.0",
  "log",
- "prover 0.1.0",
- "riscv_transpiler 0.1.0",
+ "prover",
+ "riscv_transpiler",
  "setups",
- "verifier_common 0.1.0",
- "worker 0.1.0",
+ "verifier_common",
+ "worker",
 ]
 
 [[package]]
 name = "gpu_gkr"
 version = "0.1.0"
 dependencies = [
- "cs 0.1.0",
+ "cs",
  "era_cudart",
  "era_cudart_sys",
- "field 0.1.0",
+ "field",
  "gkr_eval_ir",
  "gpu_core",
  "gpu_gkr_compiler",
@@ -3293,15 +3211,15 @@ dependencies = [
  "gpu_ops",
  "gpu_prover_context",
  "gpu_trace",
- "prover 0.1.0",
+ "prover",
 ]
 
 [[package]]
 name = "gpu_gkr_compiler"
 version = "0.1.0"
 dependencies = [
- "cs 0.1.0",
- "field 0.1.0",
+ "cs",
+ "field",
  "gkr_eval_ir",
  "serde",
  "serde_json",
@@ -3311,8 +3229,8 @@ dependencies = [
 name = "gpu_gkr_model"
 version = "0.1.0"
 dependencies = [
- "cs 0.1.0",
- "field 0.1.0",
+ "cs",
+ "field",
 ]
 
 [[package]]
@@ -3339,8 +3257,8 @@ version = "0.1.0"
 dependencies = [
  "era_cudart",
  "era_cudart_sys",
- "fft 0.1.0",
- "field 0.1.0",
+ "fft",
+ "field",
  "gpu_core",
  "gpu_native_build",
 ]
@@ -3370,14 +3288,14 @@ dependencies = [
 name = "gpu_trace"
 version = "0.1.0"
 dependencies = [
- "blake2s_u32 0.1.0",
- "common_constants 0.1.0",
- "cs 0.1.0",
+ "blake2s_u32",
+ "common_constants",
+ "cs",
  "era_cudart",
  "era_cudart_sys",
  "execution_prover_model",
- "fft 0.1.0",
- "field 0.1.0",
+ "fft",
+ "field",
  "gpu_core",
  "gpu_hash",
  "gpu_native_build",
@@ -3385,8 +3303,8 @@ dependencies = [
  "gpu_ops",
  "gpu_prover_context",
  "itertools 0.14.0",
- "prover 0.1.0",
- "riscv_transpiler 0.1.0",
+ "prover",
+ "riscv_transpiler",
 ]
 
 [[package]]
@@ -3395,8 +3313,8 @@ version = "0.1.0"
 dependencies = [
  "era_cudart",
  "era_cudart_sys",
- "fft 0.1.0",
- "field 0.1.0",
+ "fft",
+ "field",
  "gpu_core",
  "gpu_gkr",
  "gpu_hash",
@@ -3405,7 +3323,7 @@ dependencies = [
  "gpu_ops",
  "gpu_prover_context",
  "gpu_trace",
- "prover 0.1.0",
+ "prover",
 ]
 
 [[package]]
@@ -3848,8 +3766,8 @@ dependencies = [
 name = "inits_and_teardowns"
 version = "0.1.0"
 dependencies = [
- "common_constants 0.1.0",
- "prover 0.1.0",
+ "common_constants",
+ "prover",
  "serde",
  "serde_json",
  "witness_eval_generator",
@@ -3999,8 +3917,8 @@ name = "jump_branch_slt"
 version = "0.1.0"
 dependencies = [
  "circuit_common",
- "common_constants 0.1.0",
- "prover 0.1.0",
+ "common_constants",
+ "prover",
  "witness_eval_generator",
 ]
 
@@ -4053,8 +3971,8 @@ name = "keccak_chi5"
 version = "0.1.0"
 dependencies = [
  "circuit_common",
- "common_constants 0.1.0",
- "prover 0.1.0",
+ "common_constants",
+ "prover",
  "witness_eval_generator",
 ]
 
@@ -4063,8 +3981,8 @@ name = "keccak_column_parity"
 version = "0.1.0"
 dependencies = [
  "circuit_common",
- "common_constants 0.1.0",
- "prover 0.1.0",
+ "common_constants",
+ "prover",
  "witness_eval_generator",
 ]
 
@@ -4073,8 +3991,8 @@ name = "keccak_special5"
 version = "0.1.0"
 dependencies = [
  "circuit_common",
- "common_constants 0.1.0",
- "prover 0.1.0",
+ "common_constants",
+ "prover",
  "witness_eval_generator",
 ]
 
@@ -4083,8 +4001,8 @@ name = "keccak_theta_rho"
 version = "0.1.0"
 dependencies = [
  "circuit_common",
- "common_constants 0.1.0",
- "prover 0.1.0",
+ "common_constants",
+ "prover",
  "witness_eval_generator",
 ]
 
@@ -4129,8 +4047,8 @@ name = "load_store_subword_only"
 version = "0.1.0"
 dependencies = [
  "circuit_common",
- "common_constants 0.1.0",
- "prover 0.1.0",
+ "common_constants",
+ "prover",
  "witness_eval_generator",
 ]
 
@@ -4139,8 +4057,8 @@ name = "load_store_word_only"
 version = "0.1.0"
 dependencies = [
  "circuit_common",
- "common_constants 0.1.0",
- "prover 0.1.0",
+ "common_constants",
+ "prover",
  "witness_eval_generator",
 ]
 
@@ -4269,8 +4187,8 @@ name = "mul_div_unsigned"
 version = "0.1.0"
 dependencies = [
  "circuit_common",
- "common_constants 0.1.0",
- "prover 0.1.0",
+ "common_constants",
+ "prover",
  "witness_eval_generator",
 ]
 
@@ -4295,14 +4213,9 @@ dependencies = [
 name = "non_determinism_source"
 version = "0.1.0"
 dependencies = [
- "common_constants 0.1.0",
- "field 0.1.0",
+ "common_constants",
+ "field",
 ]
-
-[[package]]
-name = "non_determinism_source"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99#73d69b5346b3c2350fa104a56ec4df78840cea99"
 
 [[package]]
 name = "ntapi"
@@ -4489,7 +4402,7 @@ dependencies = [
 name = "oracle_provider"
 version = "0.1.0"
 dependencies = [
- "riscv_transpiler 0.1.0",
+ "riscv_transpiler",
  "zk_ee",
 ]
 
@@ -4748,16 +4661,16 @@ version = "0.1.0"
 dependencies = [
  "bincode 1.3.3",
  "circuit_common",
- "common_constants 0.1.0",
+ "common_constants",
  "execution_prover",
- "full_statement_verifier 0.1.0",
- "prover 0.1.0",
- "riscv_transpiler 0.1.0",
+ "full_statement_verifier",
+ "prover",
+ "riscv_transpiler",
  "serde",
  "serde_json",
  "setups",
  "trace_and_split",
- "verifier_common 0.1.0",
+ "verifier_common",
 ]
 
 [[package]]
@@ -4789,15 +4702,9 @@ version = "0.1.4"
 dependencies = [
  "bincode 2.0.1",
  "console_error_panic_hook",
- "cs 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "field 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
  "flate2",
- "full_statement_verifier 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "getrandom 0.3.4",
- "prover 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
+ "full_statement_verifier",
  "serde",
- "serde_json",
- "verifier_common 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
  "wasm-bindgen",
 ]
 
@@ -4820,52 +4727,27 @@ dependencies = [
 name = "prover"
 version = "0.1.0"
 dependencies = [
- "blake2s_u32 0.1.0",
+ "blake2s_u32",
  "cfg-if",
- "common_constants 0.1.0",
- "cs 0.1.0",
- "fft 0.1.0",
- "field 0.1.0",
+ "common_constants",
+ "cs",
+ "fft",
+ "field",
  "itertools 0.14.0",
  "mmap-io",
- "non_determinism_source 0.1.0",
+ "non_determinism_source",
  "proc-macro2",
  "quote",
- "riscv_transpiler 0.1.0",
+ "riscv_transpiler",
  "seq-macro",
  "serde",
  "serde-big-array",
  "serde_json",
  "serde_with",
  "sha3 0.12.0",
- "transcript 0.1.0",
+ "transcript",
  "unroll",
- "worker 0.1.0",
-]
-
-[[package]]
-name = "prover"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99#73d69b5346b3c2350fa104a56ec4df78840cea99"
-dependencies = [
- "blake2s_u32 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "common_constants 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "cs 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "fft 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "field 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "itertools 0.14.0",
- "non_determinism_source 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "proc-macro2",
- "quote",
- "riscv_transpiler 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "seq-macro",
- "serde",
- "serde-big-array",
- "serde_json",
- "trace_holder",
- "transcript 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "unroll",
- "worker 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
+ "worker",
 ]
 
 [[package]]
@@ -4875,19 +4757,19 @@ dependencies = [
  "clap",
  "cpu_execution_prover",
  "execution_prover",
- "full_statement_verifier 0.1.0",
+ "full_statement_verifier",
  "gpu_execution_prover",
  "log",
  "program_prover",
- "prover 0.1.0",
+ "prover",
  "riscv_common",
- "riscv_transpiler 0.1.0",
+ "riscv_transpiler",
  "serde",
  "serde_json",
  "setups",
  "sha3 0.12.0",
- "verifier_common 0.1.0",
- "worker 0.1.0",
+ "verifier_common",
+ "worker",
 ]
 
 [[package]]
@@ -5277,7 +5159,7 @@ dependencies = [
 name = "riscv_common"
 version = "0.1.0"
 dependencies = [
- "common_constants 0.1.0",
+ "common_constants",
  "seq-macro",
 ]
 
@@ -5286,11 +5168,11 @@ name = "riscv_transpiler"
 version = "0.1.0"
 dependencies = [
  "addr2line",
- "blake2s_u32 0.1.0",
+ "blake2s_u32",
  "capstone",
- "common_constants 0.1.0",
+ "common_constants",
  "dynasmrt",
- "field 0.1.0",
+ "field",
  "inferno",
  "keccak 0.2.2",
  "object",
@@ -5299,24 +5181,7 @@ dependencies = [
  "seq-macro",
  "serde",
  "serde-big-array",
- "worker 0.1.0",
-]
-
-[[package]]
-name = "riscv_transpiler"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99#73d69b5346b3c2350fa104a56ec4df78840cea99"
-dependencies = [
- "blake2s_u32 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "common_constants 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "cs 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "field 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "keccak 0.2.2",
- "ruint",
- "seq-macro",
- "serde",
- "serde-big-array",
- "worker 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
+ "worker",
 ]
 
 [[package]]
@@ -5909,7 +5774,7 @@ dependencies = [
  "blake2_g_function",
  "blake2_with_compression",
  "circuit_common",
- "common_constants 0.1.0",
+ "common_constants",
  "hex",
  "inits_and_teardowns",
  "jump_branch_slt",
@@ -5921,10 +5786,10 @@ dependencies = [
  "load_store_word_only",
  "mul_div_unsigned",
  "proc-macro2",
- "prover 0.1.0",
+ "prover",
  "quote",
  "riscv_common",
- "riscv_transpiler 0.1.0",
+ "riscv_transpiler",
  "serde",
  "serde-big-array",
  "serde_json",
@@ -5932,7 +5797,7 @@ dependencies = [
  "shift_binary",
  "syn 2.0.114",
  "unified_reduced_machine",
- "verifier_common 0.1.0",
+ "verifier_common",
 ]
 
 [[package]]
@@ -6012,8 +5877,8 @@ name = "shift_binary"
 version = "0.1.0"
 dependencies = [
  "circuit_common",
- "common_constants 0.1.0",
- "prover 0.1.0",
+ "common_constants",
+ "prover",
  "witness_eval_generator",
 ]
 
@@ -6643,22 +6508,13 @@ checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 name = "trace_and_split"
 version = "0.1.0"
 dependencies = [
- "common_constants 0.1.0",
- "prover 0.1.0",
- "riscv_transpiler 0.1.0",
+ "common_constants",
+ "prover",
+ "riscv_transpiler",
  "serde",
  "serde_json",
  "setups",
- "worker 0.1.0",
-]
-
-[[package]]
-name = "trace_holder"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99#73d69b5346b3c2350fa104a56ec4df78840cea99"
-dependencies = [
- "field 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "worker 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
+ "worker",
 ]
 
 [[package]]
@@ -6726,21 +6582,11 @@ dependencies = [
 name = "transcript"
 version = "0.1.0"
 dependencies = [
- "blake2s_u32 0.1.0",
- "field 0.1.0",
+ "blake2s_u32",
+ "field",
  "sha3 0.12.0",
  "unroll",
- "worker 0.1.0",
-]
-
-[[package]]
-name = "transcript"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99#73d69b5346b3c2350fa104a56ec4df78840cea99"
-dependencies = [
- "blake2s_u32 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "unroll",
- "worker 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
+ "worker",
 ]
 
 [[package]]
@@ -6875,19 +6721,9 @@ name = "unified_reduced_machine"
 version = "0.1.0"
 dependencies = [
  "circuit_common",
- "common_constants 0.1.0",
- "prover 0.1.0",
+ "common_constants",
+ "prover",
  "witness_eval_generator",
-]
-
-[[package]]
-name = "unified_reduced_machine_verifier"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99#73d69b5346b3c2350fa104a56ec4df78840cea99"
-dependencies = [
- "field 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "unroll",
- "verifier_common 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
 ]
 
 [[package]]
@@ -6983,31 +6819,16 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 name = "verifier_common"
 version = "0.1.0"
 dependencies = [
- "blake2s_u32 0.1.0",
- "cs 0.1.0",
- "field 0.1.0",
- "non_determinism_source 0.1.0",
+ "blake2s_u32",
+ "cs",
+ "field",
+ "non_determinism_source",
  "proc-macro2",
- "prover 0.1.0",
+ "prover",
  "quote",
  "serde",
  "serde_json",
- "transcript 0.1.0",
- "unroll",
-]
-
-[[package]]
-name = "verifier_common"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99#73d69b5346b3c2350fa104a56ec4df78840cea99"
-dependencies = [
- "blake2s_u32 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "cs 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "field 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "non_determinism_source 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "prover 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
- "serde",
- "transcript 0.1.0 (git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99)",
+ "transcript",
  "unroll",
 ]
 
@@ -7585,8 +7406,8 @@ name = "witness_eval_generator"
 version = "0.1.0"
 dependencies = [
  "bincode 1.3.3",
- "cs 0.1.0",
- "field 0.1.0",
+ "cs",
+ "field",
  "proc-macro2",
  "quote",
  "serde",
@@ -7598,15 +7419,6 @@ name = "worker"
 version = "0.1.0"
 dependencies = [
  "libc",
- "num_cpus",
- "rayon",
-]
-
-[[package]]
-name = "worker"
-version = "0.1.0"
-source = "git+https://github.com/matter-labs/zksync-airbender?rev=73d69b5346b3c2350fa104a56ec4df78840cea99#73d69b5346b3c2350fa104a56ec4df78840cea99"
-dependencies = [
  "num_cpus",
  "rayon",
 ]

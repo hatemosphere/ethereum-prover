@@ -1,128 +1,119 @@
-use serde::de::DeserializeOwned;
+use std::io::Read;
 
-use crate::SecurityLevel;
+use crate::{decode_exact, envelope_body, MAX_PROOF_BYTES};
 
-pub(crate) const PROOF_MAGIC: [u8; 8] = *b"EPROOF01";
-const PROOF_FORMAT_VERSION: u8 = 1;
+const PROOF_MAGIC: [u8; 8] = *b"EPROOF01";
+const MAX_PROOF_WORDS: u64 = 16 * 1024 * 1024;
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct EncodedProof<P> {
-    magic: [u8; 8],
-    version: u8,
-    security: u8,
-    proof: P,
+pub(crate) fn decode_proof_bytes(bytes: &[u8]) -> Result<Vec<u32>, String> {
+    if bytes.len() > MAX_PROOF_BYTES {
+        return Err("compressed proof exceeds 64 MiB limit".to_string());
+    }
+    let mut decoder = flate2::bufread::GzDecoder::new(bytes);
+    let mut prefix = [0; 10];
+    decoder
+        .read_exact(&mut prefix)
+        .map_err(|err| format!("gzip decode failed: {err}"))?;
+    envelope_body(&prefix, &PROOF_MAGIC, "proof")?;
+    let mut decompressed = prefix.to_vec();
+    (&mut decoder)
+        .take((MAX_PROOF_BYTES - prefix.len() + 1) as u64)
+        .read_to_end(&mut decompressed)
+        .map_err(|err| format!("gzip decode failed: {err}"))?;
+    if decompressed.len() > MAX_PROOF_BYTES {
+        return Err("decompressed proof exceeds 64 MiB limit".to_string());
+    }
+    if !decoder.get_ref().is_empty() {
+        return Err("trailing bytes after gzip proof".to_string());
+    }
+    decode_proof_payload(&decompressed)
 }
 
-#[derive(Debug)]
-pub(crate) struct DecodedProof<P> {
-    pub proof: P,
-    pub security: SecurityLevel,
-}
-
-pub(crate) fn decode_proof_payload<P: DeserializeOwned>(
-    bytes: &[u8],
-) -> Result<DecodedProof<P>, String> {
-    if bytes.starts_with(&PROOF_MAGIC) {
-        return decode_enveloped_proof(bytes);
+fn decode_proof_payload(bytes: &[u8]) -> Result<Vec<u32>, String> {
+    let body = envelope_body(bytes, &PROOF_MAGIC, "proof")?;
+    let (word_count, prefix_len): (u64, usize) =
+        bincode::decode_from_slice(body, bincode::config::standard())
+            .map_err(|err| format!("invalid proof word count: {err}"))?;
+    if word_count > MAX_PROOF_WORDS {
+        return Err("proof word count exceeds 16M-word limit".to_string());
     }
-
-    let proof = crate::decode_exact::<P>(bytes, "legacy proof")?;
-    Ok(DecodedProof {
-        proof,
-        security: SecurityLevel::Security80,
-    })
-}
-
-fn decode_enveloped_proof<P: DeserializeOwned>(bytes: &[u8]) -> Result<DecodedProof<P>, String> {
-    let encoded = crate::decode_exact::<EncodedProof<P>>(bytes, "proof envelope")?;
-    if encoded.magic != PROOF_MAGIC {
-        return Err("proof envelope magic does not match expected value".to_string());
+    // Every encoded u32 takes at least one byte; reject impossible lengths before allocation.
+    if word_count > (body.len() - prefix_len) as u64 {
+        return Err("truncated proof words".to_string());
     }
-    if encoded.version != PROOF_FORMAT_VERSION {
-        return Err(format!(
-            "unsupported proof envelope version {}",
-            encoded.version
-        ));
-    }
-    let security = SecurityLevel::from_wire_value(encoded.security)?;
-    Ok(DecodedProof {
-        proof: encoded.proof,
-        security,
-    })
+    decode_exact(body, "proof words")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
-    const SECURITY_100_UNIT_ENVELOPE_HEX: &str =
-        include_str!("../../../test_fixtures/proof_format/security_100_unit_envelope.hex");
+    fn payload(words: &[u32]) -> Vec<u8> {
+        let mut bytes = b"EPROOF01\x02\x64".to_vec();
+        bytes.extend(bincode::serde::encode_to_vec(words, bincode::config::standard()).unwrap());
+        bytes
+    }
 
-    #[test]
-    fn encoded_payload_starts_with_magic() {
-        let encoded = EncodedProof {
-            magic: PROOF_MAGIC,
-            version: PROOF_FORMAT_VERSION,
-            security: 100,
-            proof: (),
-        };
-
-        let bytes = bincode::serde::encode_to_vec(&encoded, bincode::config::standard())
-            .expect("encode test envelope");
-
-        assert!(bytes.starts_with(&PROOF_MAGIC));
+    fn gzip(bytes: &[u8]) -> Vec<u8> {
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        encoder.write_all(bytes).unwrap();
+        encoder.finish().unwrap()
     }
 
     #[test]
-    fn security_100_golden_envelope_decodes_security_tag() {
-        let bytes = decode_hex_fixture(SECURITY_100_UNIT_ENVELOPE_HEX);
-
-        let decoded = decode_proof_payload::<()>(&bytes).expect("decode golden unit envelope");
-
-        assert!(matches!(decoded.security, SecurityLevel::Security100));
-    }
-
-    #[test]
-    fn legacy_payload_defaults_to_security_80() {
-        let bytes = bincode::serde::encode_to_vec((), bincode::config::standard())
-            .expect("encode legacy unit proof");
-
-        let decoded = decode_proof_payload::<()>(&bytes).expect("decode legacy unit proof");
-
-        assert!(matches!(decoded.security, SecurityLevel::Security80));
-    }
-
-    #[test]
-    fn invalid_envelope_does_not_fall_back_to_legacy() {
-        let mut bytes = PROOF_MAGIC.to_vec();
-        bytes.push(0xff);
-
-        let err = decode_proof_payload::<()>(&bytes).expect_err("reject corrupt envelope");
-
-        assert!(err.contains("proof envelope"));
-    }
-
-    fn decode_hex_fixture(hex: &str) -> Vec<u8> {
-        let trimmed = hex.trim();
+    fn v2_golden_stream_decodes() {
+        let bytes = b"EPROOF01\x02\x64\x03\x01\xfb\x2c\x01\xfc\xff\xff\xff\xff";
         assert_eq!(
-            trimmed.len() % 2,
-            0,
-            "hex fixtures must have an even number of digits"
+            decode_proof_bytes(&gzip(bytes)).unwrap(),
+            [1, 300, u32::MAX]
         );
-
-        trimmed
-            .as_bytes()
-            .chunks_exact(2)
-            .map(|pair| (hex_nibble(pair[0]) << 4) | hex_nibble(pair[1]))
-            .collect()
     }
 
-    fn hex_nibble(value: u8) -> u8 {
-        match value {
-            b'0'..=b'9' => value - b'0',
-            b'a'..=b'f' => value - b'a' + 10,
-            b'A'..=b'F' => value - b'A' + 10,
-            _ => panic!("hex fixture contains a non-hex digit"),
+    #[test]
+    fn prefix_is_checked_before_body() {
+        for (index, value, message) in [(0, b'X', "magic"), (8, 1, "version"), (9, 80, "security")]
+        {
+            let mut bytes = b"EPROOF01\x02\x64".to_vec();
+            bytes[index] = value;
+            assert!(decode_proof_bytes(&gzip(&bytes))
+                .unwrap_err()
+                .contains(message));
         }
+    }
+
+    #[test]
+    fn lengths_and_trailing_bytes_are_rejected() {
+        let mut oversized = b"EPROOF01\x02\x64".to_vec();
+        oversized.extend(bincode::encode_to_vec(u64::MAX, bincode::config::standard()).unwrap());
+        assert!(decode_proof_payload(&oversized)
+            .unwrap_err()
+            .contains("limit"));
+        let mut trailing = payload(&[1]);
+        trailing.push(0);
+        assert!(decode_proof_payload(&trailing)
+            .unwrap_err()
+            .contains("trailing"));
+        let mut truncated = payload(&[u32::MAX]);
+        truncated.pop();
+        assert!(decode_proof_payload(&truncated).is_err());
+        let mut compressed = gzip(&payload(&[1]));
+        compressed.push(0);
+        assert!(decode_proof_bytes(&compressed)
+            .unwrap_err()
+            .contains("trailing"));
+        let mut corrupt = gzip(&payload(&[1]));
+        let last = corrupt.len() - 1;
+        corrupt[last] ^= 1;
+        assert!(decode_proof_bytes(&corrupt).unwrap_err().contains("gzip"));
+    }
+
+    #[test]
+    fn gzip_expansion_is_bounded() {
+        let mut bytes = b"EPROOF01\x02\x64".to_vec();
+        bytes.resize(MAX_PROOF_BYTES + 1, 0);
+        assert!(decode_proof_bytes(&gzip(&bytes))
+            .unwrap_err()
+            .contains("decompressed"));
     }
 }

@@ -1,102 +1,60 @@
-use serde::de::DeserializeOwned;
+use crate::{decode_exact, envelope_body};
 
-use crate::SecurityLevel;
+const VERIFICATION_KEY_MAGIC: [u8; 8] = *b"EVKEY001";
 
-pub(crate) const VERIFICATION_KEY_MAGIC: [u8; 8] = *b"EVKEY001";
-const VERIFICATION_KEY_FORMAT_VERSION: u8 = 1;
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct EncodedVerificationKey<Setup, Layouts> {
-    magic: [u8; 8],
-    version: u8,
-    security: u8,
-    setup: Setup,
-    layouts: Layouts,
-}
-
-#[derive(Debug)]
-pub(crate) struct DecodedVerificationKey<Setup, Layouts> {
-    pub setup: Setup,
-    pub layouts: Layouts,
-    pub security: SecurityLevel,
-}
-
-pub(crate) fn decode_verification_key<Setup: DeserializeOwned, Layouts: DeserializeOwned>(
-    bytes: &[u8],
-) -> Result<DecodedVerificationKey<Setup, Layouts>, String> {
-    if !bytes.starts_with(&VERIFICATION_KEY_MAGIC) {
-        return Err("verification key magic does not match expected value".to_string());
+pub(crate) fn decode_verification_key(bytes: &[u8]) -> Result<[[u32; 8]; 3], String> {
+    // 10 prefix bytes, two 32-byte app identifiers, and 24 u32s (at most 5 bytes each).
+    if bytes.len() > 194 {
+        return Err("verification key exceeds 194-byte limit".to_string());
     }
-
-    let encoded =
-        crate::decode_exact::<EncodedVerificationKey<Setup, Layouts>>(bytes, "verification key")?;
-    if encoded.magic != VERIFICATION_KEY_MAGIC {
-        return Err("verification key magic does not match expected value".to_string());
-    }
-    if encoded.version != VERIFICATION_KEY_FORMAT_VERSION {
-        return Err(format!(
-            "unsupported verification key version {}",
-            encoded.version
-        ));
-    }
-
-    let security = SecurityLevel::from_wire_value(encoded.security)?;
-    Ok(DecodedVerificationKey {
-        setup: encoded.setup,
-        layouts: encoded.layouts,
-        security,
-    })
+    let body = envelope_body(bytes, &VERIFICATION_KEY_MAGIC, "verification key")?;
+    let (_app_bin_keccak, _app_text_keccak, hashes): ([u8; 32], [u8; 32], [[u32; 8]; 3]) =
+        decode_exact(body, "verification key")?;
+    Ok(hashes)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const SECURITY_100_UNIT_KEY_HEX: &str =
-        include_str!("../../../test_fixtures/verification_key_format/security_100_unit_key.hex");
-
-    #[test]
-    fn security_100_golden_key_decodes_security_tag() {
-        let bytes = decode_hex_fixture(SECURITY_100_UNIT_KEY_HEX);
-
-        let decoded =
-            decode_verification_key::<(), ()>(&bytes).expect("decode golden unit verification key");
-
-        assert!(matches!(decoded.security, SecurityLevel::Security100));
-    }
-
-    #[test]
-    fn legacy_split_setup_does_not_decode_as_unified_key() {
-        let legacy_setup = bincode::serde::encode_to_vec((), bincode::config::standard())
-            .expect("encode legacy setup-like payload");
-
-        let err = decode_verification_key::<(), ()>(&legacy_setup)
-            .expect_err("reject non-envelope verification key");
-
-        assert!(err.contains("magic"));
-    }
-
-    fn decode_hex_fixture(hex: &str) -> Vec<u8> {
-        let trimmed = hex.trim();
-        assert_eq!(
-            trimmed.len() % 2,
-            0,
-            "hex fixtures must have an even number of digits"
-        );
-
-        trimmed
-            .as_bytes()
-            .chunks_exact(2)
-            .map(|pair| (hex_nibble(pair[0]) << 4) | hex_nibble(pair[1]))
-            .collect()
-    }
-
-    fn hex_nibble(value: u8) -> u8 {
-        match value {
-            b'0'..=b'9' => value - b'0',
-            b'a'..=b'f' => value - b'a' + 10,
-            b'A'..=b'F' => value - b'A' + 10,
-            _ => panic!("hex fixture contains a non-hex digit"),
+    fn key() -> Vec<u8> {
+        let mut bytes = b"EVKEY001\x02\x64".to_vec();
+        bytes.extend([0x11; 32]);
+        bytes.extend([0x22; 32]);
+        bytes.extend([1; 8]);
+        for _ in 0..8 {
+            bytes.extend([251, 44, 1]);
         }
+        bytes.extend([0; 8]);
+        bytes
+    }
+
+    #[test]
+    fn producer_golden_key_decodes() {
+        assert_eq!(
+            decode_verification_key(&key()).unwrap(),
+            [[1; 8], [300; 8], [0; 8]]
+        );
+    }
+
+    #[test]
+    fn incompatible_or_inexact_keys_are_rejected() {
+        for (index, value, message) in [(0, b'X', "magic"), (8, 1, "version"), (9, 80, "security")]
+        {
+            let mut bytes = key()[..10].to_vec();
+            bytes[index] = value;
+            assert!(decode_verification_key(&bytes)
+                .unwrap_err()
+                .contains(message));
+        }
+        let mut trailing = key();
+        trailing.push(0);
+        assert!(decode_verification_key(&trailing)
+            .unwrap_err()
+            .contains("trailing"));
+        assert!(decode_verification_key(&key()[..20]).is_err());
+        assert!(decode_verification_key(&[0; 195])
+            .unwrap_err()
+            .contains("limit"));
     }
 }
