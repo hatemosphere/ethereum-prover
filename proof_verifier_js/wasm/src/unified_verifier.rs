@@ -49,7 +49,7 @@ mod tests {
         let root = std::path::PathBuf::from(root);
         let key = std::fs::read(root.join("vk/recursion_unified_v3_security_100.vk.bin")).unwrap();
         let hashes = crate::verification_key_format::decode_verification_key(&key).unwrap();
-        for block in ["26078427", "26078715"] {
+        for block in ["26078427", "26078503", "26078715"] {
             let bytes =
                 std::fs::read(root.join(format!("blocks/{block}/proof_v2.bin.gz"))).unwrap();
             let mut words = crate::proof_format::decode_proof_bytes(&bytes).unwrap();

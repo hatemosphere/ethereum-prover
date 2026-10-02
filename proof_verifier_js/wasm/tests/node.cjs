@@ -100,7 +100,10 @@ async function main() {
         console.log(`PASS ${name}${result.trapped ? ' (trap caught as failure)' : ''}`);
         return result;
     }
-    for (const block of ['26078427', '26078715']) {
+    const wrongZeroHashes = hashes.slice();
+    wrongZeroHashes[0] = (wrongZeroHashes[0] ^ 1) >>> 0;
+    const wrongZeroKey = encodeIntegers(key.subarray(0, 74), wrongZeroHashes, false);
+    for (const block of ['26078427', '26078503', '26078715']) {
         const shape = [0, 1, 2].find(index => hashes.slice(index * 8, index * 8 + 8).every((word, i) => word === native[block].output[8 + i]));
         assert.notEqual(shape, undefined, `${block}: native chain hash must match the VK`);
         assert.equal(native[block].chain_entries, shape + 3);
@@ -115,6 +118,8 @@ async function main() {
         assert.equal(wordCursor.offset, decoded.length);
         const pack = items => gzipSync(encodeIntegers(decoded.subarray(0, 10), items, true));
         const expected = native[block].output.slice(0, 8);
+        const zeroKeyResult = await check(`${block}: changed hash[0]`, { proof, key: wrongZeroKey }, shape !== 0, shape === 0 ? /chain/ : undefined);
+        if (shape !== 0) assert.deepEqual(zeroKeyResult.output, expected);
         const valid = await check(`${block}: valid/native parity`, { proof, iterations: 6 }, true);
         assert.deepEqual(valid.output, expected);
         const warm = valid.times.slice(1).sort((a, b) => a - b);

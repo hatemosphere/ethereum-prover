@@ -36,14 +36,16 @@ V3_VERIFIER_FIXTURES=/path/to/fixtures cargo test -p proof_verifier_wasm --lib -
 node proof_verifier_js/wasm/tests/node.cjs /path/to/fixtures
 ```
 
-The fixture directory contains `blocks/{26078427,26078715}/proof_v2.bin.gz` and
+The fixture directory contains `blocks/{26078427,26078503,26078715}/proof_v2.bin.gz` and
 `vk/recursion_unified_v3_security_100.vk.bin`. The committed native reference was
 obtained by calling `prover_pipeline::verify_artifact` on each corresponding
 `artifact.json`, with the producing `eth-stf-fusaka` guest and in-tree FSV binaries
 (`FSV_DIR` unset). It stores all 16 native output words and the compressed proof
 hashes; the Node test compares the first eight words with `publicOutput`.
-Both fixtures have one unrolled recursion layer and four chain entries; the
-zero-unrolled and two-or-more-unrolled shapes still need fixtures.
+Block 26078503 has no unrolled recursion layer and three chain entries. The other
+two fixtures have one unrolled recursion layer and four chain entries. The test
+also changes only the key's hash[0]: it rejects 26078503 and accepts the other two.
+The two-or-more-unrolled shape still needs a fixture.
 
 The Node test checks valid proofs, format and corruption failures, trusted-key
 and optional-output mismatches, limits, and recovery with a fresh instance after
