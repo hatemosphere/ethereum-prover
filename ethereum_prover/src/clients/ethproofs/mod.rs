@@ -1,201 +1,226 @@
-use anyhow::Context as _;
-use base64::Engine;
-use reqwest::StatusCode;
-use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-use crate::{metrics::METRICS, proof_output::gzip_proof_bytes};
-const ETHPROOFS_STAGING_URL: &str = "https://staging--ethproofs.netlify.app/api/v0/";
-const ETHPROOFS_PRODUCTION_URL: &str = "https://ethproofs.netlify.app/api/v0/";
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-const MAX_ATTEMPTS: usize = 3;
-const BASE_BACKOFF_MS: u64 = 200;
+use base64::Engine as _;
+use reqwest::StatusCode;
+use serde::Serialize;
+use url::Url;
 
+use crate::metrics::METRICS;
+
+pub const ETHPROOFS_STAGING_URL: &str = "https://staging--ethproofs.netlify.app/api/v0/";
+pub const ETHPROOFS_PRODUCTION_URL: &str = "https://ethproofs.netlify.app/api/v0/";
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Outcome of a single request that did not succeed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubmitError {
+    /// Worth retrying later (transport failure, timeout, 408, 425, 429, 5xx).
+    Retryable {
+        reason: String,
+        retry_after: Option<Duration>,
+    },
+    /// The server rejected the request; retrying the same request will not help.
+    Permanent { reason: String },
+}
+
+impl std::fmt::Display for SubmitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Retryable { reason, .. } => write!(f, "retryable: {reason}"),
+            Self::Permanent { reason } => write!(f, "permanent: {reason}"),
+        }
+    }
+}
+
+/// EthProofs API client. Every call is a single attempt; retry policy belongs to the caller.
 #[derive(Clone, Debug)]
 pub struct EthproofsClient {
+    base_url: Url,
     auth_token: String,
     cluster_id: u64,
-    url: String,
+    verifier_id: String,
     client: reqwest::Client,
 }
 
+#[derive(Debug, Serialize)]
+struct ProofRequest {
+    block_number: u64,
+    cluster_id: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct ProvedRequest<'a> {
+    block_number: u64,
+    cluster_id: u64,
+    proving_time: u64,
+    proving_cycles: u64,
+    proof: String,
+    verifier_id: &'a str,
+}
+
 impl EthproofsClient {
-    pub fn new(staging: bool, auth_token: String, cluster_id: u64) -> Self {
-        let url = if staging {
-            ETHPROOFS_STAGING_URL.to_string()
-        } else {
-            ETHPROOFS_PRODUCTION_URL.to_string()
-        };
+    pub fn new(
+        base_url: Url,
+        auth_token: String,
+        cluster_id: u64,
+        verifier_id: String,
+    ) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            base_url.path().ends_with('/'),
+            "the EthProofs base URL must end with '/', got {base_url}"
+        );
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
             .connect_timeout(CONNECT_TIMEOUT)
-            .build()
-            .expect("failed to build ethproofs http client");
-        Self {
+            .build()?;
+        Ok(Self {
+            base_url,
             auth_token,
             cluster_id,
-            url,
+            verifier_id,
             client,
-        }
+        })
     }
 
-    pub async fn queue_proof(&self, block_number: u64) -> anyhow::Result<()> {
-        let payload = ProofRequest {
-            block_number,
-            cluster_id: self.cluster_id,
-        };
-        let endpoint = format!("{}proofs/queued", self.url);
-        self.post(&endpoint, &payload, "ethproofs request update failed")
-            .await?;
-        Ok(())
+    pub async fn queued(&self, block_number: u64) -> Result<(), SubmitError> {
+        self.post("proofs/queued", &self.request(block_number))
+            .await
     }
 
-    pub async fn proving_proof(&self, block_number: u64) -> anyhow::Result<()> {
-        let payload = ProofRequest {
-            block_number,
-            cluster_id: self.cluster_id,
-        };
-        let endpoint = format!("{}proofs/proving", self.url);
-        self.post(&endpoint, &payload, "ethproofs request update failed")
-            .await?;
-        Ok(())
+    pub async fn proving(&self, block_number: u64) -> Result<(), SubmitError> {
+        self.post("proofs/proving", &self.request(block_number))
+            .await
     }
 
-    pub async fn send_proof(
+    /// Submits a proof; `gzip_proof` is the archived gzip proof file, sent base64 encoded.
+    pub async fn proved(
         &self,
         block_number: u64,
-        proof_bytes: &[u8],
-        proving_time_secs: f64,
-        cycles: u64,
-    ) -> anyhow::Result<()> {
-        let encoded_proof = encode_proof(proof_bytes)?;
-        let payload = EthProofPayload {
+        proving_time_ms: u64,
+        proving_cycles: u64,
+        gzip_proof: &[u8],
+    ) -> Result<(), SubmitError> {
+        let payload = ProvedRequest {
             block_number,
             cluster_id: self.cluster_id,
-            proving_time: (proving_time_secs * 1000.0) as u64,
-            proving_cycles: cycles,
-            proof: encoded_proof,
-            verifier_id: "None".to_string(),
+            proving_time: proving_time_ms,
+            proving_cycles,
+            proof: base64::engine::general_purpose::STANDARD.encode(gzip_proof),
+            verifier_id: &self.verifier_id,
         };
-        let endpoint = format!("{}proofs/proved", self.url);
-        self.post(&endpoint, &payload, "ethproofs submission failed")
-            .await?;
-        Ok(())
+        self.post("proofs/proved", &payload).await
     }
 
-    async fn post<T: Serialize>(
-        &self,
-        endpoint: &str,
-        payload: &T,
-        context: &'static str,
-    ) -> anyhow::Result<()> {
-        let latency = METRICS.ethproofs_request_duration.start();
-        for attempt in 1..=MAX_ATTEMPTS {
-            let response = self
-                .client
-                .post(endpoint)
-                .bearer_auth(&self.auth_token)
-                .json(payload)
-                .send()
-                .await;
+    fn request(&self, block_number: u64) -> ProofRequest {
+        ProofRequest {
+            block_number,
+            cluster_id: self.cluster_id,
+        }
+    }
 
-            match response {
-                Ok(response) => {
-                    let status = response.status();
-                    if status.is_success() {
-                        METRICS.ethproofs_request_success_total.inc();
-                        latency.observe();
-                        return Ok(());
-                    }
-                    if should_retry_status(status) && attempt < MAX_ATTEMPTS {
-                        tracing::warn!(
-                            "ethproofs request failed with status {}, retrying (attempt {}/{})",
-                            status,
-                            attempt,
-                            MAX_ATTEMPTS
-                        );
-                    } else {
-                        METRICS.ethproofs_request_failure_total.inc();
-                        latency.observe();
-                        return Err(anyhow::anyhow!(
-                            "{context}: request failed with status {status}"
-                        ));
-                    }
-                }
-                Err(err) => {
-                    if should_retry_error(&err) && attempt < MAX_ATTEMPTS {
-                        tracing::warn!(
-                            "ethproofs request error: {}, retrying (attempt {}/{})",
-                            err,
-                            attempt,
-                            MAX_ATTEMPTS
-                        );
-                    } else {
-                        METRICS.ethproofs_request_failure_total.inc();
-                        latency.observe();
-                        return Err(err).context(context);
-                    }
+    async fn post<T: Serialize>(&self, path: &str, payload: &T) -> Result<(), SubmitError> {
+        let url = self
+            .base_url
+            .join(path)
+            .map_err(|err| SubmitError::Permanent {
+                reason: format!("invalid endpoint {path}: {err}"),
+            })?;
+        let latency = METRICS.ethproofs_request_duration.start();
+        let result = match self
+            .client
+            .post(url)
+            .bearer_auth(&self.auth_token)
+            .json(payload)
+            .send()
+            .await
+        {
+            Ok(response) => {
+                let status = response.status();
+                if status.is_success() {
+                    Ok(())
+                } else {
+                    let retry_after = response
+                        .headers()
+                        .get(reqwest::header::RETRY_AFTER)
+                        .and_then(|value| value.to_str().ok())
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .map(Duration::from_secs);
+                    let body = response.text().await.unwrap_or_default();
+                    let reason = format!("{path}: HTTP {status}: {}", truncate(&body, 300));
+                    Err(classify(status, reason, retry_after))
                 }
             }
-
-            let backoff_ms = BASE_BACKOFF_MS.saturating_mul(1 << (attempt - 1));
-            tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-        }
-
-        METRICS.ethproofs_request_failure_total.inc();
+            Err(err) => Err(SubmitError::Retryable {
+                reason: format!("{path}: {err}"),
+                retry_after: None,
+            }),
+        };
         latency.observe();
-        Err(anyhow::anyhow!("{context}: request failed after retries"))
+        match &result {
+            Ok(()) => METRICS.ethproofs_request_success_total.inc(),
+            Err(_) => METRICS.ethproofs_request_failure_total.inc(),
+        };
+        result
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EthProofPayload {
-    pub block_number: u64,
-    pub cluster_id: u64,
-    pub proving_time: u64,
-    pub proving_cycles: u64,
-    pub proof: String,
-    pub verifier_id: String,
+fn classify(status: StatusCode, reason: String, retry_after: Option<Duration>) -> SubmitError {
+    if status.is_server_error()
+        || matches!(
+            status,
+            StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_EARLY | StatusCode::TOO_MANY_REQUESTS
+        )
+    {
+        SubmitError::Retryable {
+            reason,
+            retry_after,
+        }
+    } else {
+        SubmitError::Permanent { reason }
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProofRequest {
-    pub block_number: u64,
-    pub cluster_id: u64,
-}
-
-fn encode_proof(proof_bytes: &[u8]) -> anyhow::Result<String> {
-    let compressed = gzip_proof_bytes(proof_bytes)?;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(compressed);
-    Ok(encoded)
-}
-
-fn should_retry_status(status: StatusCode) -> bool {
-    status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS
-}
-
-fn should_retry_error(err: &reqwest::Error) -> bool {
-    err.is_timeout() || err.is_connect()
+fn truncate(text: &str, max: usize) -> &str {
+    match text.char_indices().nth(max) {
+        Some((index, _)) => &text[..index],
+        None => text,
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::encode_proof;
-    use base64::Engine as _;
-    use flate2::read::GzDecoder;
-    use std::io::Read;
+    use super::*;
 
     #[test]
-    fn encode_proof_roundtrips() {
-        let input = b"proof-bytes-test-vector";
-        let encoded = encode_proof(input).expect("encode proof");
-        let decoded = base64::engine::general_purpose::STANDARD
-            .decode(encoded)
-            .expect("decode base64");
-        let mut decoder = GzDecoder::new(decoded.as_slice());
-        let mut output = Vec::new();
-        decoder.read_to_end(&mut output).expect("decompress");
-        assert_eq!(output, input);
+    fn classifies_statuses() {
+        let retryable = [500, 502, 503, 408, 425, 429];
+        let permanent = [400, 401, 403, 404, 409, 422];
+        for code in retryable {
+            let status = StatusCode::from_u16(code).unwrap();
+            assert!(
+                matches!(
+                    classify(status, String::new(), None),
+                    SubmitError::Retryable { .. }
+                ),
+                "{code}"
+            );
+        }
+        for code in permanent {
+            let status = StatusCode::from_u16(code).unwrap();
+            assert!(
+                matches!(
+                    classify(status, String::new(), None),
+                    SubmitError::Permanent { .. }
+                ),
+                "{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn base_url_must_be_a_directory() {
+        let url = Url::parse("https://example.com/api/v0").unwrap();
+        assert!(EthproofsClient::new(url, String::new(), 1, String::new()).is_err());
     }
 }

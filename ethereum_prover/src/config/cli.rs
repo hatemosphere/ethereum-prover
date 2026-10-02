@@ -15,9 +15,9 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    Block {
-        block_number: Option<u64>,
-    },
+    /// Proves (or, with `mode: cpu_witness`, executes) one block, from the cache when it is
+    /// there and over RPC otherwise.
+    Block { block_number: u64 },
     GenerateVerifierArtifacts {
         #[arg(long, default_value = "../artifacts")]
         output_dir: PathBuf,
@@ -27,7 +27,14 @@ pub enum Command {
         #[arg(long)]
         security: Option<ProofSecurity>,
     },
-    Run,
+    /// Follows the chain and proves the newest owned block, or with `--start` every owned
+    /// block from `--start` to `--end` (or onwards).
+    Run {
+        #[arg(long)]
+        start: Option<u64>,
+        #[arg(long, requires = "start")]
+        end: Option<u64>,
+    },
     /// Verifies a gzip EthProofs proof against a v2 verification key and prints the guest's
     /// public output.
     Verify {

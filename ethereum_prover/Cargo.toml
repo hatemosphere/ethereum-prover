@@ -16,12 +16,13 @@ bincode = { version = "2", features = ["serde"] }
 base64 = "0.21.7"
 clap = { version = "4.5", features = ["derive"] }
 flate2 = "1"
+sha2 = "0.10"
 reqwest = { version = "0.12", features = ["json"] }
 ruint = { workspace = true, default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 async-trait = "0.1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal"] }
 toml = "0.8"
 thiserror = "1"
 
@@ -52,6 +53,7 @@ vise-exporter = "0.3.2"
 
 [dev-dependencies]
 tempfile = "3"
+wiremock = "0.6"
 
 # [features]
 # with_gpu_prover = ["execution_utils", "execution_utils/prover", "execution_utils/gpu_prover", "risc_v_simulator"]

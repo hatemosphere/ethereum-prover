@@ -11,7 +11,7 @@ use forward_system::run::test_impl::NoopTxCallback;
 
 use crate::prover::oracle::{record_prover_input, run_forward};
 use crate::prover::types::EthBlockInput;
-use crate::{CacheStorage, observability};
+use crate::{cache::CacheStorage, observability};
 
 #[derive(Debug, Clone, Default)]
 pub struct CpuWitnessGenerator;

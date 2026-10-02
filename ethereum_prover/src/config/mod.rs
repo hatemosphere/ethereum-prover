@@ -5,7 +5,10 @@ use smart_config::{
 };
 use std::path::PathBuf;
 
-use crate::types::{CachePolicy, EthProofsSubmission, Mode, OnFailure, ProofSecurity};
+use crate::{
+    fetcher::WitnessFormat,
+    types::{CachePolicy, EthProofsSubmission, Mode, OnFailure, ProofSecurity},
+};
 
 mod cli;
 pub use cli::{Cli, Command};
@@ -34,9 +37,32 @@ pub struct EthProverConfig {
     #[config(with = Serde![str])]
     pub cache_policy: CachePolicy,
 
-    /// Optional directory for gzip proof files saved for manual verification.
+    /// Working directory: input cache in `cache/`, proof archive in `proofs/`, EthProofs
+    /// submission outbox in `outbox/`.
+    #[config(default_t = ".data".into())]
+    pub data_dir: PathBuf,
+
+    /// Optional WebSocket endpoint whose `newHeads` notifications wake the block stream
+    /// (heads are still read over `rpc_url`).
     #[config(default_t = None)]
-    pub proof_output_dir: Option<PathBuf>,
+    pub ws_url: Option<SecretString>,
+
+    /// `debug_executionWitness` response format of the RPC node.
+    #[config(default_t = WitnessFormat::Reth)]
+    #[config(with = Serde![str])]
+    pub witness_format: WitnessFormat,
+
+    /// Chain head polling interval without (or between) `newHeads` notifications.
+    #[config(default_t = 1000)]
+    pub poll_interval_ms: u64,
+
+    /// RPC attempts per request before a block is given up.
+    #[config(default_t = 3)]
+    pub rpc_attempts: usize,
+
+    /// Blocks fetched ahead of the proving worker.
+    #[config(default_t = 2)]
+    pub prefetch: usize,
 
     /// EthProofs submission target.
     #[config(default_t = EthProofsSubmission::Off)]
@@ -69,6 +95,14 @@ pub struct EthProverConfig {
     /// EthProofs cluster ID.
     #[config(default_t = None)]
     pub ethproofs_cluster_id: Option<u64>,
+
+    /// EthProofs API base URL, overriding the staging/production default.
+    #[config(default_t = None)]
+    pub ethproofs_url: Option<String>,
+
+    /// Verifier identifier sent with every proof.
+    #[config(default_t = "None".into())]
+    pub ethproofs_verifier_id: String,
 
     /// Sentry DSN for error reporting.
     #[config(default_t = None)]
@@ -154,7 +188,8 @@ eth_prover:
   mode: cpu_witness
   security: security_100
   cache_policy: off
-  proof_output_dir: .cache/proofs
+  data_dir: /var/lib/ethereum-prover
+  witness_format: geth
   block_mod: 10
   prover_id: 2
   on_failure: exit
@@ -166,9 +201,10 @@ eth_prover:
         assert!(matches!(config.security, ProofSecurity::Security100));
         assert!(matches!(config.cache_policy, CachePolicy::Off));
         assert_eq!(
-            config.proof_output_dir.as_deref(),
-            Some(std::path::Path::new(".cache/proofs"))
+            config.data_dir,
+            std::path::Path::new("/var/lib/ethereum-prover")
         );
+        assert_eq!(config.witness_format, crate::fetcher::WitnessFormat::Geth);
         assert_eq!(config.block_mod, 10);
         assert_eq!(config.prover_id, 2);
         assert!(matches!(config.on_failure, OnFailure::Exit));

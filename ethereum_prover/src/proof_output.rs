@@ -1,16 +1,15 @@
-use std::{io::Write as _, path::PathBuf};
+use std::{
+    io::Write as _,
+    path::{Path, PathBuf},
+};
 
+use alloy::primitives::B256;
 use anyhow::Context as _;
 use flate2::{Compression, write::GzEncoder};
+use serde::{Deserialize, Serialize};
 
-use crate::types::ProofSecurity;
-
-/// Compresses verifier proof bytes into the binary format consumed by manual
-/// verifier tools.
-///
-/// EthProofs wraps the same gzip payload in base64 for HTTP transport, but the
-/// persisted file intentionally stops at gzip so it can be passed directly to
-/// the JS/WASM verifier demo.
+/// Compresses an encoded proof envelope. The archived file and the EthProofs payload (before
+/// base64) are these exact bytes, which the JS/WASM verifier accepts directly.
 pub(crate) fn gzip_proof_bytes(proof_bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
     encoder
@@ -19,98 +18,101 @@ pub(crate) fn gzip_proof_bytes(proof_bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     encoder.finish().context("failed to finish gzip encoding")
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct ProofOutput {
-    output_dir: PathBuf,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProofManifest {
+    pub block_number: u64,
+    pub block_hash: B256,
+    pub cycles: u64,
+    pub proving_time_ms: u64,
+    pub proof_sha256: String,
+    pub proof_bytes: usize,
+    pub created_at_unix: u64,
 }
 
-impl ProofOutput {
-    pub(crate) fn new(output_dir: PathBuf) -> Self {
-        Self { output_dir }
+/// `<dir>/<block>/proof.bin.gz` and `manifest.json`, each written atomically.
+#[derive(Debug, Clone)]
+pub struct ProofArchive {
+    dir: PathBuf,
+}
+
+impl ProofArchive {
+    pub fn new(dir: PathBuf) -> Self {
+        Self { dir }
     }
 
-    pub(crate) fn save_gzipped_proof(
+    pub fn store(
         &self,
         block_number: u64,
-        security: ProofSecurity,
-        proof_bytes: &[u8],
+        block_hash: B256,
+        cycles: u64,
+        proving_time_ms: u64,
+        envelope: &[u8],
     ) -> anyhow::Result<PathBuf> {
-        let block_dir = self.output_dir.join(block_number.to_string());
-        std::fs::create_dir_all(&block_dir).with_context(|| {
-            format!(
-                "failed to create proof output directory {}",
-                block_dir.display()
-            )
-        })?;
-
-        let path = block_dir.join(proof_file_name(security));
-        let gzipped_proof = gzip_proof_bytes(proof_bytes).with_context(|| {
-            format!(
-                "failed to gzip proof bytes for block {block_number} ({})",
-                security.label()
-            )
-        })?;
-        std::fs::write(&path, gzipped_proof)
-            .with_context(|| format!("failed to write proof file {}", path.display()))?;
-        Ok(path)
+        let block_dir = self.dir.join(block_number.to_string());
+        std::fs::create_dir_all(&block_dir)
+            .with_context(|| format!("failed to create {}", block_dir.display()))?;
+        let proof = gzip_proof_bytes(envelope)?;
+        let proof_path = block_dir.join("proof.bin.gz");
+        write(&proof_path, &proof)?;
+        let manifest = ProofManifest {
+            block_number,
+            block_hash,
+            cycles,
+            proving_time_ms,
+            proof_sha256: alloy::hex::encode(sha256(&proof)),
+            proof_bytes: proof.len(),
+            created_at_unix: unix_now(),
+        };
+        write(
+            &block_dir.join("manifest.json"),
+            &serde_json::to_vec_pretty(&manifest)?,
+        )?;
+        Ok(proof_path)
     }
 }
 
-fn proof_file_name(security: ProofSecurity) -> &'static str {
-    match security {
-        ProofSecurity::Security80 => "proof_80.bin",
-        ProofSecurity::Security100 => "proof_100.bin",
-    }
+fn write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    crate::utils::write_atomic(path, bytes)
+        .with_context(|| format!("failed to write {}", path.display()))
 }
 
-impl ProofSecurity {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Security80 => "80-bit",
-            Self::Security100 => "100-bit",
-        }
-    }
+fn sha256(bytes: &[u8]) -> [u8; 32] {
+    use sha2::Digest as _;
+    sha2::Sha256::digest(bytes).into()
+}
+
+pub(crate) fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::Read as _;
-
-    use flate2::read::GzDecoder;
-
     use super::*;
 
     #[test]
-    fn gzip_proof_bytes_roundtrips() {
-        let proof_bytes = b"proof-bytes-test-vector";
-
-        let gzipped = gzip_proof_bytes(proof_bytes).expect("gzip proof bytes");
-
-        let mut decoder = GzDecoder::new(gzipped.as_slice());
+    fn archive_writes_proof_and_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = ProofArchive::new(dir.path().to_path_buf());
+        let path = archive
+            .store(7, B256::repeat_byte(0xab), 123, 4567, b"envelope")
+            .unwrap();
+        let proof = std::fs::read(&path).unwrap();
         let mut decoded = Vec::new();
-        decoder
-            .read_to_end(&mut decoded)
-            .expect("decode gzipped proof bytes");
-        assert_eq!(decoded, proof_bytes);
-    }
-
-    #[test]
-    fn proof_output_writes_security_specific_gzip_file() {
-        let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let output = ProofOutput::new(temp_dir.path().to_path_buf());
-        let proof_bytes = b"manual-test-proof";
-
-        let path = output
-            .save_gzipped_proof(42, ProofSecurity::Security100, proof_bytes)
-            .expect("save proof");
-
-        assert_eq!(path, temp_dir.path().join("42").join("proof_100.bin"));
-        let gzipped = std::fs::read(path).expect("read saved proof");
-        let mut decoder = GzDecoder::new(gzipped.as_slice());
-        let mut decoded = Vec::new();
-        decoder
-            .read_to_end(&mut decoded)
-            .expect("decode saved proof");
-        assert_eq!(decoded, proof_bytes);
+        std::io::Read::read_to_end(
+            &mut flate2::read::GzDecoder::new(proof.as_slice()),
+            &mut decoded,
+        )
+        .unwrap();
+        assert_eq!(decoded, b"envelope");
+        let manifest: ProofManifest =
+            serde_json::from_slice(&std::fs::read(dir.path().join("7/manifest.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest.cycles, 123);
+        assert_eq!(manifest.proving_time_ms, 4567);
+        assert_eq!(manifest.proof_bytes, proof.len());
+        assert_eq!(manifest.proof_sha256, alloy::hex::encode(sha256(&proof)));
     }
 }

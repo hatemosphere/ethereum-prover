@@ -1,19 +1,17 @@
 #![feature(allocator_api)]
 
 use anyhow::Context as _;
-use smart_config::value::ExposeSecret;
-use url::Url;
 
 use crate::{
-    cache::CacheStorage,
-    clients::ethproofs::EthproofsClient,
     config::{Cli, Command, EthProverConfig},
-    proof_output::ProofOutput,
-    prover::{cpu_witness::CpuWitnessGenerator, gpu_prover::Prover},
-    types::Mode,
+    prover::gpu_prover::Prover,
 };
 
+pub mod block_stream;
 pub mod config;
+pub mod fetcher;
+pub mod service;
+pub mod submission;
 
 pub(crate) mod cache;
 pub(crate) mod clients;
@@ -21,7 +19,6 @@ pub mod metrics;
 pub(crate) mod observability;
 pub(crate) mod proof_output;
 pub mod prover;
-pub(crate) mod tasks;
 pub mod types;
 pub(crate) mod utils;
 pub mod verification;
@@ -37,179 +34,39 @@ impl Runner {
     }
 
     pub async fn run(self, cli: Cli, config: EthProverConfig) -> anyhow::Result<()> {
-        if let Command::GenerateVerifierArtifacts {
-            output_dir,
-            app_dir,
-            security,
-        } = &cli.command
-        {
-            return verifier_artifacts::generate_verifier_artifacts(output_dir, app_dir, *security);
-        }
-        if let Command::Prove {
-            input_dir,
-            output,
-            artifact_json,
-        } = &cli.command
-        {
-            return prove_one(&config, input_dir, output, artifact_json.as_deref()).await;
-        }
-
-        let mut join_set = tokio::task::JoinSet::new();
-
-        let cache_storage = CacheStorage::new(".cache").context("failed to initialize cache")?;
-        let rpc_url = config
-            .rpc_url
-            .clone()
-            .map(|u| u.expose_secret().to_string())
-            .map(|u| u.parse::<Url>().context("invalid RPC URL"))
-            .transpose()?;
-
-        let (block_stream_receiver, should_create_cache_manager) = match cli.command {
-            Command::Run => {
-                let Some(rpc_url) = rpc_url.clone() else {
-                    anyhow::bail!("RPC URL is required for continuous mode");
-                };
-
-                // Create and run continuous block stream
-                let (stream, receiver) = tasks::block_stream::ContinuousBlockStream::new(
-                    rpc_url,
-                    config.prover_id,
-                    config.block_mod,
-                    cache_storage.clone(),
-                    config.cache_policy,
-                );
-                join_set.spawn(observability::bind_task(
-                    "continuous_block_stream",
-                    stream.run(),
-                ));
-                (receiver, true)
+        match cli.command {
+            Command::GenerateVerifierArtifacts {
+                output_dir,
+                app_dir,
+                security,
+            } => verifier_artifacts::generate_verifier_artifacts(&output_dir, &app_dir, security),
+            Command::Prove {
+                input_dir,
+                output,
+                artifact_json,
+            } => prove_one(&config, &input_dir, &output, artifact_json.as_deref()).await,
+            Command::Verify { proof, key } => {
+                let output = verification::verify_proof_file(&proof, &key)?;
+                println!("verified; public output {output:08x?}");
+                Ok(())
+            }
+            Command::Run { start: None, .. } => {
+                service::run(config, service::Work::Chain(block_stream::BlockRange::Tip)).await
+            }
+            Command::Run {
+                start: Some(start),
+                end,
+            } => {
+                service::run(
+                    config,
+                    service::Work::Chain(block_stream::BlockRange::Range { start, end }),
+                )
+                .await
             }
             Command::Block { block_number } => {
-                let (stream, receiver) = tasks::block_stream::SingleBlockStream::new(
-                    block_number,
-                    rpc_url.clone(),
-                    cache_storage.clone(),
-                    config.cache_policy,
-                );
-                // Single block mode is used for debugging, so we don't want to remove cache artifacts
-                join_set.spawn(observability::bind_task(
-                    "single_block_stream",
-                    stream.run(),
-                ));
-                (receiver, false)
-            }
-            Command::GenerateVerifierArtifacts { .. }
-            | Command::Prove { .. }
-            | Command::Verify { .. } => {
-                unreachable!("one-shot commands return before block stream initialization")
-            }
-        };
-
-        let mut mode_command_receiver = match config.mode {
-            Mode::CpuWitness => {
-                let cpu_witness_generator = CpuWitnessGenerator::new();
-                let (task, command_receiver) = tasks::cpu_witness::CpuWitnessTask::new(
-                    cpu_witness_generator,
-                    block_stream_receiver,
-                    config.on_failure,
-                    rpc_url.clone(),
-                    cache_storage.clone(),
-                );
-                join_set.spawn(observability::bind_task("cpu_witness", task.run()));
-                command_receiver
-            }
-            Mode::GpuProve => {
-                // TODO: support worker threads? Though it's likely not needed anytime soon.
-                tracing::info!("Creating GPU prover");
-                let app_dir = config.app_dir.clone();
-                let security = config.security;
-                let proof_output = config.proof_output_dir.clone().map(ProofOutput::new);
-                let gpu_prover = observability::spawn_blocking_on_current_hub(move || {
-                    Prover::new(app_dir.as_path(), None, security)
-                        .context("failed to create prover")
-                })
-                .await
-                .context("prover creation task panicked")??;
-                tracing::info!("GPU prover created");
-
-                let (task, command_receiver) = tasks::gpu_prove::GpuProveTask::new(
-                    gpu_prover,
-                    block_stream_receiver,
-                    config.on_failure,
-                    proof_output,
-                    security,
-                );
-                join_set.spawn(observability::bind_task("gpu_prove", task.run()));
-                command_receiver
-            }
-        };
-
-        if should_create_cache_manager {
-            let (cache_manager_task, new_command_receiver) = {
-                let (task, mode_command_receiver) = tasks::cache_manager::CacheManagerTask::new(
-                    mode_command_receiver,
-                    cache_storage,
-                    config.cache_policy,
-                );
-                (task, mode_command_receiver)
-            };
-            mode_command_receiver = new_command_receiver;
-            join_set.spawn(observability::bind_task(
-                "cache_manager",
-                cache_manager_task.run(),
-            ));
-        }
-
-        if config.ethproofs_submission.enabled() {
-            let Some(token) = config.ethproofs_token.clone() else {
-                anyhow::bail!("EthProofs submission token is required when submission is enabled");
-            };
-
-            let Some(cluster_id) = config.ethproofs_cluster_id else {
-                anyhow::bail!("EthProofs cluster ID is required when submission is enabled");
-            };
-
-            let ethproofs_client = EthproofsClient::new(
-                config.ethproofs_submission.is_staging(),
-                token.expose_secret().to_string(),
-                cluster_id,
-            );
-            let task = tasks::eth_proofs_upload::EthProofsUploadTask::new(
-                ethproofs_client,
-                mode_command_receiver,
-            );
-            join_set.spawn(observability::bind_task("ethproofs_upload", task.run()));
-        } else {
-            let task = tasks::eth_proofs_upload::EthProofsNoOpTask::new(mode_command_receiver);
-            join_set.spawn(observability::bind_task("ethproofs_noop", task.run()));
-        }
-
-        while let Some(result) = join_set.join_next().await {
-            match result {
-                Ok(Ok(())) => {
-                    if matches!(cli.command, Command::Run) {
-                        tracing::warn!(
-                            "A task finished unexpectedly in continuous mode. Shutting down the runtime"
-                        );
-                    }
-                }
-                Ok(Err(err)) => {
-                    tracing::error!("Received a task error: {err}");
-                    join_set.abort_all();
-                    return Err(err);
-                }
-                Err(err) => {
-                    let panic_msg = crate::utils::extract_panic_message(err);
-                    tracing::error!("Received a join error: {panic_msg}");
-                    join_set.abort_all();
-                    return Err(anyhow::anyhow!(
-                        "A task panicked during execution: {panic_msg}"
-                    ));
-                }
+                service::run(config, service::Work::Block(block_number)).await
             }
         }
-
-        Ok(())
     }
 }
 
