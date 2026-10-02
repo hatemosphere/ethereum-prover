@@ -9,7 +9,6 @@ use crate::{
     observability,
     prover::{
         cpu_witness::{CpuWitnessGenerator, DebuggerTxCallback},
-        oracle::build_oracle,
         types::EthBlockInput,
     },
     tasks::CalculationUpdate,
@@ -114,12 +113,9 @@ impl CpuWitnessTask {
     async fn process_block(&self, witness: EthBlockInput) -> anyhow::Result<Vec<u32>> {
         let block_number = witness.block_header.number;
         tracing::info!("Performing forward run for block {}", block_number);
-        let oracle = build_oracle(witness.clone()).with_context(|| {
-            format!("failed to build the forward-run oracle for block {block_number}")
-        })?;
         if let Err(err) = self
             .witness_generator
-            .forward_run(block_number, oracle)
+            .forward_run(block_number, witness.clone())
             .await
             .with_context(|| format!("failed to perform forward run for block {block_number}"))
         {
@@ -130,12 +126,9 @@ impl CpuWitnessTask {
         }
 
         tracing::info!("Generating witness for block {}", block_number);
-        let oracle = build_oracle(witness).with_context(|| {
-            format!("failed to build the witness oracle for block {block_number}")
-        })?;
         let cpu_witness = self
             .witness_generator
-            .generate_witness(block_number, oracle)
+            .generate_witness(block_number, witness)
             .await
             .with_context(|| format!("failed to generate witness data for block {block_number}"))?;
         Ok(cpu_witness)
@@ -148,9 +141,6 @@ impl CpuWitnessTask {
                 tracing::warn!(
                     "Forward run failed for block {block_number}, attempting to debug using RPC"
                 );
-                let oracle = build_oracle(witness.clone()).with_context(|| {
-                    format!("failed to build the debug oracle for block {block_number}")
-                })?;
                 let provider = alloy::providers::builder().connect_http(rpc_url.clone());
                 let provider = DynProvider::new(provider);
 
@@ -162,7 +152,7 @@ impl CpuWitnessTask {
                 );
                 let debugger = self
                     .witness_generator
-                    .debug(block_number, oracle, debugger)
+                    .debug(block_number, witness, debugger)
                     .await
                     .with_context(|| format!("debugging failed for block {block_number}"))?;
                 tracing::info!("Debugging completed for block {}", block_number);

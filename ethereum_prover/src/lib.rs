@@ -38,10 +38,11 @@ impl Runner {
     pub async fn run(self, cli: Cli, config: EthProverConfig) -> anyhow::Result<()> {
         if let Command::GenerateVerifierArtifacts {
             output_dir,
+            app_dir,
             security,
         } = &cli.command
         {
-            return verifier_artifacts::generate_verifier_artifacts(output_dir, *security);
+            return verifier_artifacts::generate_verifier_artifacts(output_dir, app_dir, *security);
         }
 
         let mut join_set = tokio::task::JoinSet::new();
@@ -95,7 +96,7 @@ impl Runner {
 
         let mut mode_command_receiver = match config.mode {
             Mode::CpuWitness => {
-                let cpu_witness_generator = CpuWitnessGenerator::new(config.app_bin_path);
+                let cpu_witness_generator = CpuWitnessGenerator::new();
                 let (task, command_receiver) = tasks::cpu_witness::CpuWitnessTask::new(
                     cpu_witness_generator,
                     block_stream_receiver,
@@ -109,11 +110,11 @@ impl Runner {
             Mode::GpuProve => {
                 // TODO: support worker threads? Though it's likely not needed anytime soon.
                 tracing::info!("Creating GPU prover");
-                let app_bin_path = config.app_bin_path.clone();
+                let app_dir = config.app_dir.clone();
                 let security = config.security;
                 let proof_output = config.proof_output_dir.clone().map(ProofOutput::new);
                 let gpu_prover = observability::spawn_blocking_on_current_hub(move || {
-                    Prover::new(app_bin_path.as_path(), None, security)
+                    Prover::new(app_dir.as_path(), None, security)
                         .context("failed to create prover")
                 })
                 .await

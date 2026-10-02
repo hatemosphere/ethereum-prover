@@ -1,13 +1,15 @@
 use alloy::{
     consensus::Header,
+    eips::Encodable2718 as _,
     rlp::Encodable as _,
     rpc::types::{Block, Transaction, debug::ExecutionWitness},
 };
+use zksync_os_interface::traits::EncodedTx;
 
 #[derive(Clone)]
 pub struct EthBlockInput {
     pub transactions: Vec<Transaction>,
-    pub encoded_transactions: Vec<Vec<u8>>,
+    pub encoded_transactions: Vec<EncodedTx>,
     pub execution_witness: ExecutionWitness,
     pub block_header: Header,
     pub withdrawals_rlp: Vec<u8>,
@@ -26,7 +28,7 @@ impl EthBlockInput {
             .transactions
             .clone()
             .into_transactions()
-            .map(|tx| tx.inner.into_encoded().encoded_bytes().to_vec())
+            .map(|tx| EncodedTx::Rlp(tx.inner.inner().encoded_2718(), tx.inner.signer()))
             .collect();
 
         Self {

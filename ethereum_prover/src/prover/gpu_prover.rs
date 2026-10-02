@@ -1,12 +1,12 @@
+use airbender_host::{GpuProver, GpuProverConfig, Program, Prover as _};
 use anyhow::Context as _;
-use oracle_provider::ZkEENonDeterminismSource;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::{
     observability,
-    prover::{airbender_compat::NewAirbenderNonDeterminismSource, proof_format::encode_proof},
+    prover::{oracle::record_prover_input, proof_format::encode_proof, types::EthBlockInput},
     types::ProofSecurity,
 };
 
@@ -18,10 +18,9 @@ pub struct ProofResult {
 }
 
 pub struct Prover {
-    app_bin_path: PathBuf,
+    app_dir: PathBuf,
     worker_threads: Option<usize>,
-    security: ProofSecurity,
-    inner: Arc<Mutex<Option<execution_utils::unrolled_gpu::UnrolledProver>>>,
+    inner: Arc<Mutex<Option<GpuProver>>>,
 }
 
 impl std::fmt::Debug for Prover {
@@ -32,96 +31,81 @@ impl std::fmt::Debug for Prover {
 
 impl Prover {
     pub fn new(
-        app_bin_path: &Path,
+        app_dir: &Path,
         worker_threads: Option<usize>,
         security: ProofSecurity,
     ) -> anyhow::Result<Self> {
-        let inner =
-            create_unrolled_prover(app_bin_path, worker_threads, security).with_context(|| {
-                format!(
-                    "failed to create unrolled prover with app binary at {:?}",
-                    app_bin_path
-                )
-            })?;
+        anyhow::ensure!(
+            security == ProofSecurity::Security100,
+            "the v3 prover only supports 100-bit security, got {}-bit",
+            security.proof_wire_value()
+        );
+        let inner = create_gpu_prover(app_dir, worker_threads).with_context(|| {
+            format!(
+                "failed to create the GPU prover for the program in {}",
+                app_dir.display()
+            )
+        })?;
         Ok(Self {
-            app_bin_path: app_bin_path.to_path_buf(),
+            app_dir: app_dir.to_path_buf(),
             worker_threads,
-            security,
             inner: Arc::new(Mutex::new(Some(inner))),
         })
     }
 
+    /// Records the prover input of the block and proves it; `proving_time_secs` covers both.
     pub async fn prove(
         &mut self,
         block_number: u64,
-        oracle: ZkEENonDeterminismSource,
+        input: EthBlockInput,
     ) -> anyhow::Result<ProofResult> {
         let start = Instant::now();
 
         let inner = self.inner.clone();
 
-        // We execute the heavy GPU work on a blocking thread, but keep the
+        // We execute the heavy work on a blocking thread, but keep the
         // current hub bound so a panic still lands in Sentry with the block tag.
         let future_result = observability::spawn_blocking_on_current_hub(move || {
+            let words = record_prover_input(input).with_context(|| {
+                format!("failed to record the prover input for block {block_number}")
+            })?;
             let prover = inner.lock().map_err(|_| {
                 anyhow::anyhow!("prover mutex is poisoned while processing block {block_number}")
             })?;
             let prover = prover.as_ref().ok_or_else(|| {
                 anyhow::anyhow!("prover is not available while processing block {block_number}")
             })?;
-            let oracle = NewAirbenderNonDeterminismSource::from(oracle);
-            Ok(prover.prove(block_number, oracle))
+            let result = prover
+                .prove(&words)
+                .with_context(|| format!("failed to prove block {block_number}"));
+            Ok((result, prover.is_poisoned()))
         })
         .await;
-        let (proof, cycles) = match future_result {
-            Ok(Ok(result)) => result,
+        let result = match future_result {
+            Ok(Ok((result, poisoned))) => {
+                if poisoned {
+                    self.replace_prover(block_number)?;
+                }
+                result?
+            }
             Ok(Err(err)) => return Err(err),
             Err(err) => {
                 let panic_msg = crate::utils::extract_panic_message(err);
                 tracing::error!("Prover panicked for block {}: {}", block_number, panic_msg);
-
-                // If prover panics, it is not safe to use it again, since some of threads may be poisoned/dead.
-                // We need to re-instantiate it.
-                {
-                    // Ensure that we only have a single reference.
-                    let strong_count = Arc::strong_count(&self.inner);
-                    anyhow::ensure!(
-                        strong_count == 1,
-                        "failed to recover prover after block {block_number} panic: expected exactly one strong reference, found {}",
-                        strong_count
-                    );
-
-                    let mut inner = self.inner.lock().map_err(|_| {
-                        anyhow::anyhow!(
-                            "prover mutex is poisoned while recovering from block {block_number} panic"
-                        )
-                    })?;
-                    let old_value = inner.take();
-                    tracing::info!("Dropping the existing (poisoned) prover instance");
-                    drop(old_value);
-
-                    tracing::info!("Re-creating a new prover instance to replace the poisoned one");
-                    let replacement = create_unrolled_prover(
-                        self.app_bin_path.as_path(),
-                        self.worker_threads,
-                        self.security,
-                    )
-                    .with_context(|| {
-                        format!(
-                            "failed to re-instantiate prover after panic while processing block {block_number}"
-                        )
-                    })?;
-                    *inner = Some(replacement);
-                }
-
+                self.replace_prover(block_number)?;
                 return Err(anyhow::anyhow!(
                     "prover task panicked while processing block {block_number}: {panic_msg}"
                 ));
             }
         };
+        anyhow::ensure!(
+            result.receipt.output.iter().any(|word| *word != 0),
+            "proof output for block {block_number} is all zeroes, the block execution failed inside the guest"
+        );
 
         let proving_time_secs = start.elapsed().as_secs_f64();
-        let proof_bytes = encode_proof(proof, self.security)
+        let cycles = result.program_cycles;
+        let proof_bytes = encode_proof(result.proof)
             .with_context(|| format!("failed to encode proof bytes for block {block_number}"))?;
         Ok(ProofResult {
             proof_bytes,
@@ -129,37 +113,38 @@ impl Prover {
             proving_time_secs,
         })
     }
-}
 
-fn strip_bin_suffix(path: &Path) -> anyhow::Result<String> {
-    let path_str = path
-        .to_str()
-        .ok_or_else(|| anyhow::anyhow!("app path is not valid UTF-8"))?;
-    if let Some(stripped) = path_str.strip_suffix(".bin") {
-        Ok(stripped.to_string())
-    } else {
-        Ok(path_str.to_string())
+    /// A failed or panicked prover is not safe to reuse, since some of its threads may be
+    /// poisoned or dead, so it is replaced by a new instance.
+    fn replace_prover(&mut self, block_number: u64) -> anyhow::Result<()> {
+        let strong_count = Arc::strong_count(&self.inner);
+        anyhow::ensure!(
+            strong_count == 1,
+            "failed to recover prover after block {block_number}: expected exactly one strong reference, found {}",
+            strong_count
+        );
+
+        let mut inner = self.inner.lock().map_err(|_| {
+            anyhow::anyhow!("prover mutex is poisoned while recovering after block {block_number}")
+        })?;
+        tracing::info!("Dropping the existing (poisoned) prover instance");
+        drop(inner.take());
+
+        tracing::info!("Re-creating a new prover instance to replace the poisoned one");
+        let replacement = create_gpu_prover(self.app_dir.as_path(), self.worker_threads)
+            .with_context(|| {
+                format!("failed to re-instantiate prover after block {block_number}")
+            })?;
+        *inner = Some(replacement);
+        Ok(())
     }
 }
 
-fn create_unrolled_prover(
-    app_bin_path: &Path,
-    worker_threads: Option<usize>,
-    security: ProofSecurity,
-) -> anyhow::Result<execution_utils::unrolled_gpu::UnrolledProver> {
-    let base_path = strip_bin_suffix(app_bin_path)?;
-    let mut configuration =
-        execution_utils::gpu_prover::execution::prover::ExecutionProverConfiguration::default();
-    if let Some(threads) = worker_threads {
-        configuration.max_thread_pool_threads = Some(threads);
-        configuration.replay_worker_threads_count = threads;
-    }
-
-    let unrolled_prover = execution_utils::unrolled_gpu::UnrolledProver::new(
-        security.airbender_security_model(),
-        &base_path,
-        configuration,
-        execution_utils::unrolled_gpu::UnrolledProverLevel::RecursionUnified,
-    );
-    Ok(unrolled_prover)
+fn create_gpu_prover(app_dir: &Path, worker_threads: Option<usize>) -> anyhow::Result<GpuProver> {
+    let program = Program::load(app_dir)?;
+    let prover = program
+        .gpu_prover()
+        .with_config(GpuProverConfig::default().maybe_worker_threads(worker_threads))
+        .build()?;
+    Ok(prover)
 }

@@ -1,7 +1,7 @@
 # Use this config for easy local debugging: only generate witness on CPU, no proofs
 
 eth_prover:
-  app_bin_path: "../artifacts/app.bin"
+  app_dir: "../artifacts/eth_stf"
   mode: "cpu_witness"
   cache_policy: "on_failure"
   ethproofs_submission: "off"

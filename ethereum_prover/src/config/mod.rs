@@ -14,9 +14,10 @@ pub use cli::{Cli, Command};
 #[derive(Debug, DescribeConfig, DeserializeConfig)]
 #[config(derive(Default))] // derive according to default values for params
 pub struct EthProverConfig {
-    /// RISC-V executable to use for proving.
-    #[config(default_t = "../../artifacts/app.bin".into())]
-    pub app_bin_path: PathBuf,
+    /// Distribution directory of the RISC-V program to prove (`manifest.toml`, `app.bin`,
+    /// `app.elf`, `app.text`), as written by zksync-os `dump_bin.sh --type eth-stf-fusaka`.
+    #[config(default_t = "../../artifacts/eth_stf".into())]
+    pub app_dir: PathBuf,
 
     /// Stages to execute.
     #[config(default_t = Mode::CpuWitness)]

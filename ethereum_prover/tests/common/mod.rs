@@ -29,8 +29,8 @@ pub fn fixture_witness_path(fixture: &str) -> PathBuf {
         .join("execution_witness.json")
 }
 
-pub fn app_bin_path() -> PathBuf {
-    manifest_dir().join("../artifacts/app.bin")
+pub fn app_dir() -> PathBuf {
+    manifest_dir().join("../artifacts/eth_stf")
 }
 
 pub fn load_fixture_input(fixture: &str) -> EthBlockInput {
@@ -44,6 +44,31 @@ pub fn load_fixture_input(fixture: &str) -> EthBlockInput {
     let witness: ExecutionWitness =
         serde_json::from_str(&witness_json).expect("parse fixture witness");
     EthBlockInput::new(block, witness)
+}
+
+/// Block and witness from raw JSON-RPC responses (`{"jsonrpc", "id", "result"}`) as
+/// `eth_getBlockByNumber` and `debug_executionWitness` return them.
+pub fn load_rpc_response_input(dir: &std::path::Path) -> EthBlockInput {
+    fn result<T: serde::de::DeserializeOwned>(path: PathBuf) -> T {
+        let json = std::fs::read_to_string(&path)
+            .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
+        let mut response: serde_json::Value = serde_json::from_str(&json).expect("parse response");
+        serde_json::from_value(response["result"].take()).expect("parse result")
+    }
+    EthBlockInput::new(
+        result(dir.join("block.json")),
+        result(dir.join("witness.json")),
+    )
+}
+
+/// Words written by zksync-os eth_runner's `write_prover_input` (bincode of a newtype over
+/// `Vec<u32>`).
+pub fn load_eth_runner_prover_input(path: &std::path::Path) -> Vec<u32> {
+    let bytes = std::fs::read(path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
+    let (words, _): (Vec<u32>, usize) =
+        bincode::serde::decode_from_slice(&bytes, bincode::config::standard())
+            .expect("decode prover input");
+    words
 }
 
 pub fn init_tracing() {

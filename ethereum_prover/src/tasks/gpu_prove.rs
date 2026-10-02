@@ -2,7 +2,7 @@ use crate::{
     metrics::{InflightGuard, METRICS},
     observability,
     proof_output::ProofOutput,
-    prover::{gpu_prover::ProofResult, oracle::build_oracle, types::EthBlockInput},
+    prover::{gpu_prover::ProofResult, types::EthBlockInput},
     tasks::CalculationUpdate,
     types::{OnFailure, ProofSecurity},
 };
@@ -125,14 +125,11 @@ impl GpuProveTask {
 
     async fn process_block(&mut self, witness: EthBlockInput) -> anyhow::Result<ProofResult> {
         let block_number = witness.block_header.number;
-        let oracle = build_oracle(witness).with_context(|| {
-            format!("failed to build the proving oracle for block {block_number}")
-        })?;
 
         tracing::info!("Proving block {} on GPU", block_number);
         let proof_result = self
             .gpu_prover
-            .prove(block_number, oracle)
+            .prove(block_number, witness)
             .await
             .with_context(|| format!("failed to prove block {block_number}"))?;
 

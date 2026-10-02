@@ -1,48 +1,30 @@
 use std::collections::VecDeque;
-use std::path::PathBuf;
 
 use alloy::providers::DynProvider;
 use alloy::providers::Provider;
 use alloy::rpc::types::Transaction;
 use anyhow::Context as _;
-use basic_bootloader::bootloader::BasicBootloader;
-use basic_bootloader::bootloader::config::BasicBootloaderForwardETHLikeConfig;
 use forward_system::run::InvalidTransaction;
 use forward_system::run::TxResultCallback;
-use forward_system::run::result_keeper::ForwardRunningResultKeeper;
 use forward_system::run::result_keeper::TxProcessingOutputOwned;
 use forward_system::run::test_impl::NoopTxCallback;
-use forward_system::system::system_types::ethereum::EthereumStorageSystemTypesWithPostOps;
-use oracle_provider::ReadWitnessSource;
-use oracle_provider::ZkEENonDeterminismSource;
-use zk_ee::system::tracer::NopTracer;
 
+use crate::prover::oracle::{record_prover_input, run_forward};
+use crate::prover::types::EthBlockInput;
 use crate::{CacheStorage, observability};
 
-#[derive(Debug, Clone)]
-pub struct CpuWitnessGenerator {
-    app_bin_path: PathBuf,
-}
+#[derive(Debug, Clone, Default)]
+pub struct CpuWitnessGenerator;
 
 impl CpuWitnessGenerator {
-    pub fn new(app_bin_path: PathBuf) -> Self {
-        Self { app_bin_path }
+    pub fn new() -> Self {
+        Self
     }
 
-    pub async fn forward_run(
-        &self,
-        block_number: u64,
-        oracle: ZkEENonDeterminismSource,
-    ) -> anyhow::Result<()> {
+    pub async fn forward_run(&self, block_number: u64, input: EthBlockInput) -> anyhow::Result<()> {
         match observability::spawn_blocking_on_current_hub(move || {
-            let mut result_keeper = ForwardRunningResultKeeper::new(NoopTxCallback);
-            let mut nop_tracer = NopTracer::default();
-            BasicBootloader::<EthereumStorageSystemTypesWithPostOps<ZkEENonDeterminismSource>>::run::<
-                BasicBootloaderForwardETHLikeConfig,
-            >(oracle, &mut result_keeper, &mut nop_tracer)
-            .map_err(|err| anyhow::anyhow!("failed to run the STF in forward-run mode: {err:?}"))?;
-
-            Ok(())
+            let (_, result) = run_forward(input, NoopTxCallback)?;
+            result.context("failed to run the STF in forward-run mode")
         })
         .await
         {
@@ -59,22 +41,13 @@ impl CpuWitnessGenerator {
     pub async fn debug(
         &self,
         block_number: u64,
-        oracle: ZkEENonDeterminismSource,
+        input: EthBlockInput,
         debugger: DebuggerTxCallback,
     ) -> anyhow::Result<DebuggerTxCallback> {
         match observability::spawn_blocking_on_current_hub(move || {
-            let mut result_keeper = ForwardRunningResultKeeper::new(debugger);
-            let mut nop_tracer = NopTracer::default();
-            // We ignore the error, as we are debugging and getting the results.
-            let _ = BasicBootloader::<
-                EthereumStorageSystemTypesWithPostOps<ZkEENonDeterminismSource>,
-            >::run::<BasicBootloaderForwardETHLikeConfig>(
-                oracle,
-                &mut result_keeper,
-                &mut nop_tracer,
-            );
-
-            Ok(result_keeper.tx_result_callback)
+            // We ignore the run result, as we are debugging and getting the results.
+            let (debugger, _) = run_forward(input, debugger)?;
+            Ok(debugger)
         })
         .await
         {
@@ -91,28 +64,13 @@ impl CpuWitnessGenerator {
     pub async fn generate_witness(
         &self,
         block_number: u64,
-        oracle: ZkEENonDeterminismSource,
+        input: EthBlockInput,
     ) -> anyhow::Result<Vec<u32>> {
-        let app_bin_path = self.app_bin_path.clone();
-        match observability::spawn_blocking_on_current_hub(move || {
-            let copy_source = ReadWitnessSource::new(oracle);
-            let items = copy_source.get_read_items();
-
-            let output = zksync_os_runner::run(app_bin_path, None, 1 << 36, copy_source);
-            if output == [0u32; 8] {
-                anyhow::bail!("zksync_os_runner failed to execute block {block_number}");
-            }
-
-            let witness = items.borrow().clone();
-            Ok(witness)
-        })
-        .await
+        match observability::spawn_blocking_on_current_hub(move || record_prover_input(input)).await
         {
             Ok(Ok(witness)) => Ok(witness),
             Ok(Err(err)) => Err(err).with_context(|| {
-                format!(
-                    "failed to generate witness for block {block_number} using zksync_os_runner"
-                )
+                format!("failed to record the prover input for block {block_number}")
             }),
             Err(err) => {
                 let panic_msg = crate::utils::extract_panic_message(err);

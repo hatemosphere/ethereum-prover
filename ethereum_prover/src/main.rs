@@ -22,10 +22,11 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     if let Command::GenerateVerifierArtifacts {
         output_dir,
+        app_dir,
         security,
     } = &cli.command
     {
-        verifier_artifacts::generate_verifier_artifacts(output_dir, *security)
+        verifier_artifacts::generate_verifier_artifacts(output_dir, app_dir, *security)
             .context("failed to generate verifier artifacts")?;
         return Ok(());
     }

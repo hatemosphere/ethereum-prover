@@ -1,7 +1,7 @@
 # Use this config to submit proofs to EthProofs staging
 
 eth_prover:
-  app_bin_path: "../artifacts/app.bin"
+  app_dir: "../artifacts/eth_stf"
   mode: "gpu_prove"
   security: "security_100"
   cache_policy: "on_failure"

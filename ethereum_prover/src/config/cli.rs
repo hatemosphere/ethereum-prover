@@ -21,6 +21,9 @@ pub enum Command {
     GenerateVerifierArtifacts {
         #[arg(long, default_value = "../artifacts")]
         output_dir: PathBuf,
+        /// Distribution directory of the guest program the key is for.
+        #[arg(long, default_value = "../artifacts/eth_stf")]
+        app_dir: PathBuf,
         #[arg(long)]
         security: Option<ProofSecurity>,
     },
