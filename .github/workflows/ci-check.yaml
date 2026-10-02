@@ -111,10 +111,13 @@ jobs:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       - uses: ./.github/actions/checkout-stack
       - uses: ./.github/actions/build-reproducible-guest
+      # upload-artifact rejects paths outside the workspace.
+      - name: Stage the guest in the workspace
+        run: mkdir -p ci-guest && cp -a ../zksync-os/zksync_os/dist/eth_stf/. ci-guest/
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: reproducible-guest
-          path: ../zksync-os/zksync_os/dist/eth_stf/
+          path: ci-guest/
           if-no-files-found: error
           retention-days: 1
 
@@ -152,7 +155,10 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: reproducible-guest
-          path: ../zksync-os/zksync_os/dist/eth_stf
+          path: ci-guest
+
+      - name: Place the guest in the zksync-os checkout
+        run: mkdir -p ../zksync-os/zksync_os/dist/eth_stf && cp -a ci-guest/. ../zksync-os/zksync_os/dist/eth_stf/
 
       - name: Assemble the complete v3 bundle
         run: scripts/copy_artifacts.sh
