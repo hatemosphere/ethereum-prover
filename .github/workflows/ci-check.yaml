@@ -26,6 +26,9 @@ jobs:
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
+      - name: Checkout v3 stack
+        uses: ./.github/actions/checkout-stack
+
       - name: Install Rust toolchain
         uses: moonrepo/setup-rust@ede6de059f8046a5e236c94046823e2af11ca670 # v1.2.2
         with:
@@ -75,10 +78,19 @@ jobs:
   ethereum-prover-checks:
     name: ethereum-prover checks 🧪
     runs-on: matterlabs-ci-runner-high-performance
+    container:
+      image: nvidia/cuda:13.3.1-devel-ubuntu26.04
     env:
-      ZKSYNC_USE_CUDA_STUBS: true
+      CUDAARCHS: '80;89;90;120'
+      RUST_MIN_STACK: 1073741824
     steps:
+      - name: Install Git in the CUDA container
+        run: apt-get update && apt-get install -y git
+
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Checkout v3 stack
+        uses: ./.github/actions/checkout-stack
 
       - name: Setup runner
         uses: ./.github/actions/runner-setup
@@ -91,7 +103,7 @@ jobs:
       #   run: cargo clippy -p ethereum_prover --no-deps -- -D warnings
 
       - name: Tests (nextest)
-        run: RUST_MIN_STACK=267108864 cargo nextest run -p ethereum_prover --release
+        run: RUST_MIN_STACK=1073741824 cargo nextest run -p ethereum_prover --release
 
   ##########################################
   #  Build prover integration tests archive #
@@ -100,21 +112,33 @@ jobs:
     name: build prover tests 📦
     runs-on: matterlabs-ci-runner-high-performance
     container:
-      image: nvidia/cuda:12.9.1-devel-ubuntu22.04
+      image: nvidia/cuda:13.3.1-devel-ubuntu26.04
     env:
       # The build container has no attached GPU, so the CUDA build must not rely
       # on `native` architecture detection. Keep this aligned with the GPU CI
       # runner fleet, following the working zksync-airbender setup.
-      CUDAARCHS: '80;89;90'
-      RUST_MIN_STACK: 267108864
+      CUDAARCHS: '80;89;90;120'
+      RUST_MIN_STACK: 1073741824
     steps:
+      - name: Install Git in the CUDA container
+        run: apt-get update && apt-get install -y git
+
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Checkout v3 stack
+        uses: ./.github/actions/checkout-stack
 
       - name: Setup runner
         uses: ./.github/actions/runner-setup
 
       - name: Check CUDA version
         run: nvcc --version
+
+      - name: Build the complete v3 guest bundle
+        run: |
+          cargo install cargo-binutils --version 0.4.0 --locked
+          cargo install --path ../airbender-platform/crates/cargo-airbender --no-default-features --locked
+          scripts/rebuild_artifacts.sh
 
       - name: Build and archive tests
         run: cargo nextest archive --release -p ethereum_prover --test integration --archive-file "${PROVER_GPU_TESTS}.tar.zst"
@@ -123,7 +147,9 @@ jobs:
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: ${{ env.PROVER_GPU_TESTS }}
-          path: ${{ env.PROVER_GPU_TESTS }}.tar.zst
+          path: |
+            ${{ env.PROVER_GPU_TESTS }}.tar.zst
+            artifacts/eth_stf/
           if-no-files-found: error
           retention-days: 1
 
@@ -133,9 +159,18 @@ jobs:
   ethereum-prover-gpu-tests:
     name: ethereum-prover gpu tests 🖥️
     runs-on: matterlabs-ci-gpu-runner
+    container:
+      image: nvidia/cuda:13.3.1-runtime-ubuntu26.04
+      options: --gpus all
     needs: build-prover-tests
     steps:
+      - name: Install Git in the CUDA container
+        run: apt-get update && apt-get install -y git
+
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Checkout v3 stack
+        uses: ./.github/actions/checkout-stack
 
       - name: Setup runner
         uses: ./.github/actions/runner-setup
@@ -149,7 +184,8 @@ jobs:
       - name: Run prover tests on GPU
         env:
           RUN_GPU_TESTS: '1'
-          RUST_MIN_STACK: 267108864
+          FSV_DIR: ${{ github.workspace }}/../zksync-airbender/tools/gkr_verifier
+          RUST_MIN_STACK: 1073741824
         run: cargo nextest run --archive-file "${PROVER_GPU_TESTS}.tar.zst" --workspace-remap "${GITHUB_WORKSPACE}"
 
   # Special job that allows some of the jobs to be skipped or failed

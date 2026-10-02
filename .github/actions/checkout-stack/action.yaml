@@ -1,0 +1,22 @@
+name: Checkout v3 siblings
+description: Fetch the pinned stack next to the prover checkout for Cargo path dependencies.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        source "${GITHUB_WORKSPACE}/.github/stack-revisions.env"
+        parent=$(dirname "${GITHUB_WORKSPACE}")
+        checkout() {
+          local name=$1 revision=$2 dir="${parent}/$1"
+          if [[ ! -d "${dir}/.git" ]]; then
+            git init --quiet "${dir}"
+          fi
+          git -C "${dir}" fetch --depth 1 "https://github.com/matter-labs/${name}.git" "${revision}"
+          git -C "${dir}" checkout --detach "${revision}"
+          git -C "${dir}" submodule update --init --recursive
+        }
+        checkout zksync-os "${ZKSYNC_OS_REV}"
+        checkout airbender-platform "${AIRBENDER_PLATFORM_REV}"
+        checkout zksync-airbender "${ZKSYNC_AIRBENDER_REV}"

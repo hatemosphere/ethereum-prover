@@ -1,0 +1,21 @@
+package = "zksync_os"
+manifest = "v1"
+codec = "v0"
+target = "riscv32im-risc0-zkvm-elf"
+
+[bin]
+path = "app.bin"
+sha256 = "6ba625cde65d1f2ca1a4cf4425a9afe6777540eeac316c96aa0c149b9e9110f2"
+
+[elf]
+path = "app.elf"
+sha256 = "c9b79016e090da645a61f6f28343be5cef201678c6c71753f410976372747520"
+
+[text]
+path = "app.text"
+sha256 = "ce96b62ee61e908ee9f6c95696b643e40a1f141887a309ba43c4e136d65e0eb1"
+
+[build]
+profile = "release"
+git_branch = "rr/eth-prover-v3"
+git_commit = "85c318c85c6ca1dd6786acc383286304dd2f5ee2"

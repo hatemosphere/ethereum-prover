@@ -1,12 +1,10 @@
-#!/bin/env bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-set -e
+repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+zkos_dir=$(cd -- "${repo_dir}/../zksync-os" && pwd)
+export RUST_MIN_STACK=${RUST_MIN_STACK:-1073741824}
 
-echo "Rebuilding RISC-V binary"
-cd ../zksync-os/zksync_os
-./dump_bin.sh --type pectra
-
-echo "Generating setup for RISC-V verifier"
-cd ../
-RUST_MIN_STACK=267108864 cargo test --release -p eth_runner -- generate_setup_and_layout_for_final_proof --ignored
-echo "Rebuilding artifacts completed."
+# cargo-airbender and cargo-binutils must be installed; see scripts/README.md.
+(cd "${zkos_dir}/zksync_os" && ./dump_bin.sh --type eth-stf-fusaka)
+exec "${repo_dir}/scripts/copy_artifacts.sh"
