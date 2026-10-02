@@ -28,4 +28,15 @@ pub enum Command {
         security: Option<ProofSecurity>,
     },
     Run,
+    /// Proves one block from `--input-dir` (`block.json` + `execution_witness.json`, plain or
+    /// raw JSON-RPC responses) and writes the gzip EthProofs proof, without submitting it.
+    Prove {
+        #[arg(long)]
+        input_dir: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        /// Also write the native proof artifact as JSON (for verification and debugging).
+        #[arg(long)]
+        artifact_json: Option<PathBuf>,
+    },
 }

@@ -8,4 +8,4 @@ pub mod gpu_prover;
 pub mod oracle;
 pub mod types;
 
-mod proof_format;
+pub mod proof_format;

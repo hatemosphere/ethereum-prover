@@ -57,6 +57,8 @@ async fn gpu_prover_from_fixture_block() {
         .await
         .expect("prove block");
 
+    assert!(result.cycles > 0);
+    let result = result.encode().expect("encode proof");
     assert!(!result.proof_bytes.is_empty());
     assert!(result.cycles > 0);
     assert!(result.proving_time_secs > 0.0);

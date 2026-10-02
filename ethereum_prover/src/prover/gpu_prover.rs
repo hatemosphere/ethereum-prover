@@ -1,7 +1,6 @@
-use airbender_host::{GpuProver, GpuProverConfig, Program, Prover as _};
+use airbender_host::{GpuProver, GpuProverConfig, Program, Proof, Prover as _};
 use anyhow::Context as _;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::{
@@ -10,6 +9,15 @@ use crate::{
     types::ProofSecurity,
 };
 
+/// A proof of one block with the figures reported to EthProofs.
+pub struct ProvedBlock {
+    pub proof: Proof,
+    /// Cycles the guest program executed (the base layer).
+    pub cycles: u64,
+    /// Prover input recording + proving.
+    pub proving_time_secs: f64,
+}
+
 #[derive(Debug)]
 pub struct ProofResult {
     pub proof_bytes: Vec<u8>,
@@ -17,10 +25,22 @@ pub struct ProofResult {
     pub proving_time_secs: f64,
 }
 
+impl ProvedBlock {
+    pub fn encode(self) -> anyhow::Result<ProofResult> {
+        Ok(ProofResult {
+            proof_bytes: encode_proof(self.proof)?,
+            cycles: self.cycles,
+            proving_time_secs: self.proving_time_secs,
+        })
+    }
+}
+
+/// Owns one GPU prover. A prover that failed is never reused: it is dropped and a new one
+/// is built before the next block, outside that block's timing.
 pub struct Prover {
     app_dir: PathBuf,
     worker_threads: Option<usize>,
-    inner: Arc<Mutex<Option<GpuProver>>>,
+    current: Option<GpuProver>,
 }
 
 impl std::fmt::Debug for Prover {
@@ -40,16 +60,11 @@ impl Prover {
             "the v3 prover only supports 100-bit security, got {}-bit",
             security.proof_wire_value()
         );
-        let inner = create_gpu_prover(app_dir, worker_threads).with_context(|| {
-            format!(
-                "failed to create the GPU prover for the program in {}",
-                app_dir.display()
-            )
-        })?;
+        let current = create_gpu_prover(app_dir, worker_threads)?;
         Ok(Self {
             app_dir: app_dir.to_path_buf(),
             worker_threads,
-            inner: Arc::new(Mutex::new(Some(inner))),
+            current: Some(current),
         })
     }
 
@@ -58,44 +73,50 @@ impl Prover {
         &mut self,
         block_number: u64,
         input: EthBlockInput,
-    ) -> anyhow::Result<ProofResult> {
+    ) -> anyhow::Result<ProvedBlock> {
+        if self.current.is_none() {
+            self.rebuild(block_number).await?;
+        }
+        let prover = self.current.take().expect("a prover after rebuild");
+
         let start = Instant::now();
-
-        let inner = self.inner.clone();
-
-        // We execute the heavy work on a blocking thread, but keep the
-        // current hub bound so a panic still lands in Sentry with the block tag.
-        let future_result = observability::spawn_blocking_on_current_hub(move || {
-            let words = record_prover_input(input).with_context(|| {
-                format!("failed to record the prover input for block {block_number}")
-            })?;
-            let prover = inner.lock().map_err(|_| {
-                anyhow::anyhow!("prover mutex is poisoned while processing block {block_number}")
-            })?;
-            let prover = prover.as_ref().ok_or_else(|| {
-                anyhow::anyhow!("prover is not available while processing block {block_number}")
-            })?;
-            let result = prover
-                .prove(&words)
-                .with_context(|| format!("failed to prove block {block_number}"));
-            Ok((result, prover.is_poisoned()))
+        // The heavy work runs on a blocking thread with the current hub bound, so a panic
+        // still lands in Sentry with the block tag.
+        let joined = observability::spawn_blocking_on_current_hub(move || {
+            let result = record_prover_input(input)
+                .with_context(|| {
+                    format!("failed to record the prover input for block {block_number}")
+                })
+                .and_then(|words| {
+                    prover
+                        .prove(&words)
+                        .with_context(|| format!("failed to prove block {block_number}"))
+                });
+            (prover, result)
         })
         .await;
-        let result = match future_result {
-            Ok(Ok((result, poisoned))) => {
-                if poisoned {
-                    self.replace_prover(block_number)?;
+        let proving_time_secs = start.elapsed().as_secs_f64();
+
+        let result = match joined {
+            Ok((prover, result)) => {
+                if prover.is_poisoned() {
+                    tracing::error!("The GPU prover failed on block {block_number}, replacing it");
+                    observability::spawn_blocking_on_current_hub(move || drop(prover))
+                        .await
+                        .ok();
+                    self.rebuild(block_number).await?;
+                } else {
+                    self.current = Some(prover);
                 }
                 result?
             }
-            Ok(Err(err)) => return Err(err),
             Err(err) => {
                 let panic_msg = crate::utils::extract_panic_message(err);
-                tracing::error!("Prover panicked for block {}: {}", block_number, panic_msg);
-                self.replace_prover(block_number)?;
-                return Err(anyhow::anyhow!(
+                tracing::error!("Prover panicked for block {block_number}: {panic_msg}");
+                self.rebuild(block_number).await?;
+                anyhow::bail!(
                     "prover task panicked while processing block {block_number}: {panic_msg}"
-                ));
+                );
             }
         };
         anyhow::ensure!(
@@ -103,48 +124,43 @@ impl Prover {
             "proof output for block {block_number} is all zeroes, the block execution failed inside the guest"
         );
 
-        let proving_time_secs = start.elapsed().as_secs_f64();
-        let cycles = result.program_cycles;
-        let proof_bytes = encode_proof(result.proof)
-            .with_context(|| format!("failed to encode proof bytes for block {block_number}"))?;
-        Ok(ProofResult {
-            proof_bytes,
-            cycles,
+        Ok(ProvedBlock {
+            proof: result.proof,
+            cycles: result.program_cycles,
             proving_time_secs,
         })
     }
 
-    /// A failed or panicked prover is not safe to reuse, since some of its threads may be
-    /// poisoned or dead, so it is replaced by a new instance.
-    fn replace_prover(&mut self, block_number: u64) -> anyhow::Result<()> {
-        let strong_count = Arc::strong_count(&self.inner);
-        anyhow::ensure!(
-            strong_count == 1,
-            "failed to recover prover after block {block_number}: expected exactly one strong reference, found {}",
-            strong_count
-        );
-
-        let mut inner = self.inner.lock().map_err(|_| {
-            anyhow::anyhow!("prover mutex is poisoned while recovering after block {block_number}")
-        })?;
-        tracing::info!("Dropping the existing (poisoned) prover instance");
-        drop(inner.take());
-
-        tracing::info!("Re-creating a new prover instance to replace the poisoned one");
-        let replacement = create_gpu_prover(self.app_dir.as_path(), self.worker_threads)
-            .with_context(|| {
-                format!("failed to re-instantiate prover after block {block_number}")
-            })?;
-        *inner = Some(replacement);
+    async fn rebuild(&mut self, block_number: u64) -> anyhow::Result<()> {
+        let app_dir = self.app_dir.clone();
+        let worker_threads = self.worker_threads;
+        let replacement = observability::spawn_blocking_on_current_hub(move || {
+            create_gpu_prover(&app_dir, worker_threads)
+        })
+        .await
+        .map_err(|err| {
+            anyhow::anyhow!(
+                "rebuilding the prover panicked: {}",
+                crate::utils::extract_panic_message(err)
+            )
+        })?
+        .with_context(|| format!("failed to rebuild the prover after block {block_number}"))?;
+        self.current = Some(replacement);
         Ok(())
     }
 }
 
 fn create_gpu_prover(app_dir: &Path, worker_threads: Option<usize>) -> anyhow::Result<GpuProver> {
-    let program = Program::load(app_dir)?;
+    let program = Program::load(app_dir).with_context(|| {
+        format!(
+            "failed to load the guest program from {}",
+            app_dir.display()
+        )
+    })?;
     let prover = program
         .gpu_prover()
         .with_config(GpuProverConfig::default().maybe_worker_threads(worker_threads))
-        .build()?;
+        .build()
+        .context("failed to build the GPU prover")?;
     Ok(prover)
 }

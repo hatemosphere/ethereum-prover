@@ -44,6 +44,14 @@ impl Runner {
         {
             return verifier_artifacts::generate_verifier_artifacts(output_dir, app_dir, *security);
         }
+        if let Command::Prove {
+            input_dir,
+            output,
+            artifact_json,
+        } = &cli.command
+        {
+            return prove_one(&config, input_dir, output, artifact_json.as_deref()).await;
+        }
 
         let mut join_set = tokio::task::JoinSet::new();
 
@@ -89,8 +97,8 @@ impl Runner {
                 ));
                 (receiver, false)
             }
-            Command::GenerateVerifierArtifacts { .. } => {
-                unreachable!("artifact generation returns before block stream initialization")
+            Command::GenerateVerifierArtifacts { .. } | Command::Prove { .. } => {
+                unreachable!("one-shot commands return before block stream initialization")
             }
         };
 
@@ -200,4 +208,38 @@ impl Runner {
 
         Ok(())
     }
+}
+
+async fn prove_one(
+    config: &EthProverConfig,
+    input_dir: &std::path::Path,
+    output: &std::path::Path,
+    artifact_json: Option<&std::path::Path>,
+) -> anyhow::Result<()> {
+    let input = prover::types::EthBlockInput::from_dir(input_dir)?;
+    let block_number = input.block_header.number;
+    let app_dir = config.app_dir.clone();
+    let security = config.security;
+    let mut gpu_prover = observability::spawn_blocking_on_current_hub(move || {
+        Prover::new(app_dir.as_path(), None, security)
+    })
+    .await
+    .context("prover initialization task panicked")??;
+    let proved = gpu_prover.prove(block_number, input).await?;
+    tracing::info!(
+        "Proved block {block_number}: {} cycles in {:.3} s",
+        proved.cycles,
+        proved.proving_time_secs
+    );
+    let artifact = prover::proof_format::final_artifact(proved.proof)?;
+    if let Some(path) = artifact_json {
+        let json = serde_json::to_vec(&artifact).context("failed to serialize the artifact")?;
+        std::fs::write(path, json)
+            .with_context(|| format!("failed to write {}", path.display()))?;
+    }
+    let bytes = proof_output::gzip_proof_bytes(&prover::proof_format::encode_artifact(&artifact)?)?;
+    std::fs::write(output, &bytes)
+        .with_context(|| format!("failed to write {}", output.display()))?;
+    tracing::info!("Wrote {} ({} bytes)", output.display(), bytes.len());
+    Ok(())
 }

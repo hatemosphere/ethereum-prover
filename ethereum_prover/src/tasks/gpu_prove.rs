@@ -131,7 +131,9 @@ impl GpuProveTask {
             .gpu_prover
             .prove(block_number, witness)
             .await
-            .with_context(|| format!("failed to prove block {block_number}"))?;
+            .with_context(|| format!("failed to prove block {block_number}"))?
+            .encode()
+            .with_context(|| format!("failed to encode the proof of block {block_number}"))?;
 
         if let Some(proof_output) = &self.proof_output {
             let proof_path = proof_output

@@ -1,4 +1,4 @@
-use airbender_host::{Proof, ProverLevel};
+use airbender_host::{Proof, ProverLevel, raw::ProofArtifact};
 use full_statement_verifier::host_utils::build_unified_stream;
 
 pub(crate) const PROOF_MAGIC: [u8; 8] = *b"EPROOF01";
@@ -16,6 +16,11 @@ struct EncodedProof {
 }
 
 pub(crate) fn encode_proof(proof: Proof) -> anyhow::Result<Vec<u8>> {
+    encode_artifact(&final_artifact(proof)?)
+}
+
+/// The native artifact of a final unified recursion proof.
+pub fn final_artifact(proof: Proof) -> anyhow::Result<ProofArtifact> {
     let Proof::Real(proof) = proof else {
         anyhow::bail!("only real proofs can be encoded for EthProofs");
     };
@@ -24,7 +29,10 @@ pub(crate) fn encode_proof(proof: Proof) -> anyhow::Result<Vec<u8>> {
         "only final unified recursion proofs can be encoded for EthProofs, got {:?}",
         proof.level()
     );
-    let artifact = proof.into_inner();
+    Ok(proof.into_inner())
+}
+
+pub fn encode_artifact(artifact: &ProofArtifact) -> anyhow::Result<Vec<u8>> {
     let proof_words = build_unified_stream(&artifact.setups, &artifact.proof);
     Ok(encode_envelope(proof_words)?)
 }
