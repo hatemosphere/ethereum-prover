@@ -160,6 +160,11 @@ jobs:
       - name: Place the guest in the zksync-os checkout
         run: mkdir -p ../zksync-os/zksync_os/dist/eth_stf && cp -a ci-guest/. ../zksync-os/zksync_os/dist/eth_stf/
 
+      # The checkouts belong to the runner user, not the container's root, and the bundle
+      # metadata reads their commits with git.
+      - name: Mark the checkouts safe for git
+        run: git config --global --add safe.directory '*'
+
       - name: Assemble the complete v3 bundle
         run: scripts/copy_artifacts.sh
 
