@@ -35,6 +35,14 @@ pub enum Command {
         #[arg(long, requires = "start")]
         end: Option<u64>,
     },
+    /// Proves the block in `--input-dir` once to warm up and then `--runs` more times with the
+    /// same prover, reporting prover input, proving and total time per run.
+    Bench {
+        #[arg(long)]
+        input_dir: PathBuf,
+        #[arg(long, default_value_t = 5)]
+        runs: usize,
+    },
     /// Verifies a gzip EthProofs proof against a v2 verification key and prints the guest's
     /// public output.
     Verify {

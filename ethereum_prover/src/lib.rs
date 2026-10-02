@@ -63,6 +63,7 @@ impl Runner {
                 )
                 .await
             }
+            Command::Bench { input_dir, runs } => bench(&config, &input_dir, runs).await,
             Command::Block { block_number } => {
                 service::run(config, service::Work::Block(block_number)).await
             }
@@ -101,5 +102,55 @@ async fn prove_one(
     std::fs::write(output, &bytes)
         .with_context(|| format!("failed to write {}", output.display()))?;
     tracing::info!("Wrote {} ({} bytes)", output.display(), bytes.len());
+    Ok(())
+}
+
+async fn bench(
+    config: &EthProverConfig,
+    input_dir: &std::path::Path,
+    runs: usize,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(runs > 0, "--runs must be positive");
+    let input = prover::types::EthBlockInput::from_dir(input_dir)?;
+    let block_number = input.block_header.number;
+    let app_dir = config.app_dir.clone();
+    let security = config.security;
+    let init = std::time::Instant::now();
+    let mut gpu_prover = observability::spawn_blocking_on_current_hub(move || {
+        Prover::new(app_dir.as_path(), None, security)
+    })
+    .await
+    .context("prover initialization task panicked")??;
+    println!(
+        "prover initialization: {:.3} s",
+        init.elapsed().as_secs_f64()
+    );
+
+    let mut totals = Vec::with_capacity(runs);
+    for run in 0..=runs {
+        let proved = gpu_prover.prove(block_number, input.clone()).await?;
+        let label = if run == 0 {
+            "warm-up".to_string()
+        } else {
+            format!("run {run}")
+        };
+        println!(
+            "{label}: total {:.3} s = prover input {:.3} s + proving {:.3} s, {} cycles",
+            proved.proving_time_secs,
+            proved.prover_input_secs,
+            proved.proving_time_secs - proved.prover_input_secs,
+            proved.cycles
+        );
+        if run > 0 {
+            totals.push(proved.proving_time_secs);
+        }
+    }
+    totals.sort_by(f64::total_cmp);
+    println!(
+        "block {block_number}, {runs} runs after warm-up: min {:.3} s, median {:.3} s, max {:.3} s",
+        totals[0],
+        totals[totals.len() / 2],
+        totals[totals.len() - 1]
+    );
     Ok(())
 }
