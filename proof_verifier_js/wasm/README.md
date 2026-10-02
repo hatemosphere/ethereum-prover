@@ -21,7 +21,8 @@ Decode errors throw; ordinary verification errors return `success: false` with n
 The JS caller must catch exceptions, report failure, and discard the entire WASM
 instance before another verification. Do not call `free()` on a trapped instance.
 `tests/node.cjs` demonstrates this boundary with a fresh worker for each case.
-Updating the TypeScript package and browser demo is a separate port step.
+The [TypeScript package](../ts/README.md) handles instance recovery and exposes
+the same verified output to the browser demo.
 
 Compressed and decompressed proofs are each limited to 64 MiB, the decoded vector
 to 16M words, and keys to 194 bytes. Prefix validation precedes body decoding;

@@ -5,8 +5,7 @@
         <p class="eyebrow">Proof Verifier</p>
         <h1>Verify ethproofs in your browser.</h1>
         <p class="subtitle">
-          Provide a gzip+bincode proof blob and matching single-file verification key. The proof is
-          unpacked and verified locally in WASM.
+          Verify a v3 Ethereum proof locally with its trusted security-100 verification key.
         </p>
       </div>
       <div class="orb" aria-hidden="true"></div>
@@ -19,7 +18,7 @@
           id="proof-file"
           class="input file-input"
           type="file"
-          accept=".bin"
+          accept=".bin,.gz"
           @change="onFileChange"
         />
         <button class="button" :disabled="busy" @click="verify">
@@ -37,8 +36,16 @@
       />
 
       <p class="hint">
-        Tip: upload the `recursion_unified_*.vk.bin` key that matches the proof security level.
+        Use <code>recursion_unified_v3_security_100.vk.bin</code> for the guest that produced the proof.
       </p>
+
+      <label class="label" for="expected-output">Expected public output (optional)</label>
+      <input
+        id="expected-output"
+        v-model="expectedOutput"
+        class="input expected-output"
+        placeholder="Eight hexadecimal u32 words, separated by spaces"
+      />
 
       <section class="status" :data-state="status.state">
         <div class="status-header">
@@ -51,6 +58,10 @@
             <li>{{ status.error }}</li>
           </ul>
         </div>
+        <div v-if="status.publicOutput" class="public-output">
+          <p>Verified public output</p>
+          <code>{{ status.publicOutput }}</code>
+        </div>
       </section>
     </main>
 
@@ -62,17 +73,19 @@
 
 <script setup lang="ts">
 import { ref } from "vue";
-import { createVerifier, type VerificationResult } from "@matterlabs/ethproofs-airbender-verifier";
+import { createVerifier, type ProofHandle, type Verifier } from "@matterlabs/ethproofs-airbender-verifier";
 
 const proofFile = ref<File | null>(null);
 const verificationKeyFile = ref<File | null>(null);
 const busy = ref(false);
+const expectedOutput = ref("");
 
 const status = ref({
   state: "idle",
   label: "Waiting",
   meta: "No verification run yet.",
-  error: null as string | null
+  error: null as string | null,
+  publicOutput: null as string | null
 });
 
 function setStatus(update: Partial<typeof status.value>) {
@@ -94,6 +107,7 @@ async function readFileBytes(file: File): Promise<Uint8Array> {
 }
 
 async function verify() {
+  setStatus({ publicOutput: null });
   if (!proofFile.value) {
     setStatus({
       state: "error",
@@ -117,14 +131,24 @@ async function verify() {
   busy.value = true;
   setStatus({
     state: "loading",
-    label: "Fetching",
-    meta: "Downloading proof data...",
+    label: "Reading",
+    meta: "Reading the selected files...",
     error: null
   });
 
+  let verifier: Verifier | undefined;
+  let handle: ProofHandle | undefined;
   try {
+    let expected: Uint32Array | undefined;
+    if (expectedOutput.value.trim()) {
+      const words = expectedOutput.value.trim().split(/[\s,]+/);
+      if (words.length !== 8 || words.some(word => !/^(0x)?[0-9a-f]{1,8}$/i.test(word))) {
+        throw new Error("Expected public output must contain eight hexadecimal u32 words.");
+      }
+      expected = Uint32Array.from(words, word => parseInt(word, 16));
+    }
     const verificationKey = await readFileBytes(verificationKeyFile.value);
-    const verifier = await createVerifier({ verificationKey });
+    verifier = await createVerifier({ verificationKey });
     setStatus({
       state: "loading",
       label: "Verifying",
@@ -132,15 +156,16 @@ async function verify() {
       error: null
     });
 
-    const handle = verifier.deserializeProofBytes(await readFileBytes(proofFile.value));
-    const result: VerificationResult = verifier.verifyProof(handle);
+    handle = verifier.deserializeProofBytes(await readFileBytes(proofFile.value));
+    const result = verifier.verifyProof(handle, expected);
 
     if (result.success) {
       setStatus({
         state: "success",
         label: "Verified",
         meta: "Proof verified successfully.",
-        error: null
+        error: null,
+        publicOutput: Array.from(result.publicOutput!, word => word.toString(16).padStart(8, "0")).join(" ")
       });
     } else {
       setStatus({
@@ -158,6 +183,8 @@ async function verify() {
       error: error instanceof Error ? error.message : String(error)
     });
   } finally {
+    handle?.free();
+    verifier?.free();
     busy.value = false;
   }
 }
@@ -265,6 +292,16 @@ async function verify() {
   color: #fff;
   font-weight: 600;
   cursor: pointer;
+}
+
+.expected-output {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 10px;
+}
+
+.public-output code {
+  overflow-wrap: anywhere;
 }
 
 .input:focus {

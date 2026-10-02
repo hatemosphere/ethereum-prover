@@ -1,68 +1,71 @@
-# Airbender ZK Proof Verifier for EthProofs
+# Airbender v3 proof verifier for EthProofs
 
-[Airbender](https://github.com/matter-labs/zksync-airbender) verifier for Ethereum STF ZK proofs submitted to the EthProofs website.
-This package bundles the WASM verifier and a small TypeScript wrapper.
+Version 1.0.0 verifies gzip-compressed `EPROOF01` v2 proofs at security 100.
+It bundles the WASM verifier and supports browsers and Node.js through an ESM API.
+Supply the trusted `recursion_unified_v3_security_100.vk.bin` key for the producing
+Ethereum STF guest. Keys use `EVKEY001` v2 and bind the permitted recursion chains.
 
-## Installation
-
-```sh
-yarn add @matterlabs/ethproofs-airbender-verifier
-```
+Version 1 proofs, security-80 proofs, and split `setupBin` / `layoutBin` keys need
+the old 0.x package. This version rejects them and has no split-key options.
 
 ## Usage
 
 ```ts
 import { createVerifier } from "@matterlabs/ethproofs-airbender-verifier";
 
-const verifier = await createVerifier({
-  verificationKey
-});
-
-// Deserialize the submitted proof (without `base64` encoding; e.g. format that is used on EthProofs to store proofs)
-const handle = verifier.deserializeProofBytes(proofBytes);
-// Verify deserialized proof.
-const result = verifier.verifyProof(handle);
-
-if (!result.success) {
-  console.error(result.error);
+const verifier = await createVerifier({ verificationKey });
+try {
+  const handle = verifier.deserializeProofBytes(proofBytes);
+  try {
+    // Optionally pass eight expected u32 words as a Uint32Array.
+    const result = verifier.verifyProof(handle, expectedOutput);
+    if (result.success) console.log(result.publicOutput);
+    else console.error(result.error);
+  } finally {
+    handle.free();
+  }
+} finally {
+  verifier.free();
 }
 ```
 
-`createVerifier()` requires explicit verification keys.
-`verifyProof(handle)` requires the proof security level to match the supplied
-verification key. Legacy proof payloads do not carry that metadata, so they are
-verified as 80-bit proofs.
+`createVerifier({verificationKey})` is asynchronous; `deserializeProofBytes` and
+`verifyProof` remain synchronous. `verifyProof(handle, expectedOutput?)` returns
+`{ success, error, publicOutput }`. On success, `error` is null and `publicOutput`
+is a copied `Uint32Array` of eight verified words. On failure, `publicOutput` is
+null and `error` explains the failure. A supplied expected output must contain
+exactly eight words and match the verified output.
 
-## Verification keys
+Key and decode errors throw. Verification errors, including WASM traps, return
+failure. Each verifier owns its WASM instance; only the compiled module is shared.
+After a trap, all handles from that instance are invalidated. Deserialize the
+proof again: the same verifier object creates a fresh instance using a copy of
+its original trusted key. Other verifier objects are unaffected.
 
-Use single-file verification keys for new integrations:
+Call `handle.free()` when finished; it is safe after a trap or an earlier free.
+Handles cannot be transferred between verifiers. `verifier.free()` releases the
+verifier and invalidates its handles. Generated GC finalizers are disabled so
+that garbage collection cannot call into a trapped WASM instance.
 
-```ts
-import { createVerifier } from "proof-verifier-js";
+The decoder limits compressed and decompressed proofs to 64 MiB each, proof
+vectors to 16M words, and keys to 194 bytes. It rejects trailing bytes and words.
+The eight output words are returned as u32 values, without interpreting them as
+a block hash; callers can enforce the application's expected output explicitly.
 
-const verifier = await createVerifier({
-  verificationKey
-});
+## Local build and tests
+
+```sh
+yarn install --frozen-lockfile
+yarn build
+yarn test /path/to/fixtures
 ```
 
-The key must match the proof’s circuit version and security level.
-
-## Legacy setup/layout
-
-Use this only when you need to verify with existing 80-bit split setup/layout
-artifacts.
-
-```ts
-import { createVerifier } from "proof-verifier-js";
-
-const verifier = await createVerifier({
-  setupBin,
-  layoutBin
-});
-```
-
-The legacy `setupBin` / `layoutBin` pair initializes 80-bit verification only.
-Use the single-file VK format for 100-bit verification.
+Builds require the repository Rust toolchain, the `wasm32-unknown-unknown` target,
+`wasm-pack`, and the sibling v3 airbender checkout. The package test loads its
+built public entry point and checks the three real proofs (26078427, 26078503,
+26078715) against native outputs, wrong keys, corruption, output checks, handle
+ownership, and repeated trap recovery. See [the WASM tests](../wasm/README.md) for
+the fixture layout and native reference provenance.
 
 ## License
 

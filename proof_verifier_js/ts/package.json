@@ -1,6 +1,6 @@
 {
   "name": "@matterlabs/ethproofs-airbender-verifier",
-  "version": "0.1.4",
+  "version": "1.0.0",
   "description": "Airbender ZK Proof Verifier for EthProofs",
   "license": "(MIT OR Apache-2.0)",
   "repository": {
@@ -20,14 +20,15 @@
   "readme": "README.md",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
   },
   "scripts": {
     "build:wasm": "cd ../wasm && ./build_for_ts.sh",
     "build:ts": "tsup",
     "build": "yarn build:wasm && yarn build:ts",
+    "test": "node tests/node.mjs",
     "prepack": "yarn build"
   },
   "files": [
@@ -38,6 +39,7 @@
     "LICENSE-APACHE"
   ],
   "devDependencies": {
+    "@types/node": "^22",
     "tsup": "^8.0.1",
     "typescript": "^5.4.5"
   }
