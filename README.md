@@ -28,15 +28,17 @@ next to the prover checkout; the pinned commits must be published upstream befor
 remote CI can use them.
 
 Build with `nightly-2026-08-09`, CUDA 13.3.1, and `RUST_MIN_STACK=1073741824`.
-The [container build](docker/ethereum-prover/README.md) installs the build tools
-and creates the complete runtime bundle:
+Install the sibling `cargo-airbender` as described in
+[scripts/README.md](scripts/README.md). The
+[container build](docker/ethereum-prover/README.md) prepares a reproducible guest
+on the host Docker daemon, then builds the service and complete runtime bundle:
 
 ```sh
 scripts/build_docker.sh -t ethereum-prover:v3
 ```
 
 For a native build, install the guest tools described in [scripts/README.md](scripts/README.md),
-then run `scripts/rebuild_artifacts.sh`. It rebuilds `eth-stf-fusaka`, ships the
+then run `scripts/rebuild_artifacts.sh`. It rebuilds `eth-stf-fusaka` reproducibly, ships the
 trusted FSV `.bin`/`.text` files, generates the v2 key, and records source commits
 and SHA-256 hashes. See [artifacts/README.md](artifacts/README.md) for tracked and
 generated files. Always set `FSV_DIR` when relocating the service.

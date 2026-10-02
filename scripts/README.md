@@ -7,18 +7,23 @@ revisions in [stack-revisions.env](../.github/stack-revisions.env).
 
 ## Rebuild artifacts
 
-Install the pinned toolchain and the guest-build tools:
+Install the pinned toolchain and the sibling guest-build tool. Docker must be
+installed and accessible as `docker` on `PATH`:
 
 ```sh
-rustup toolchain install nightly-2026-08-09 --component rust-src --component llvm-tools-preview
-cargo +nightly-2026-08-09 install cargo-binutils --version 0.4.0 --locked
+rustup toolchain install nightly-2026-08-09
 RUST_MIN_STACK=1073741824 cargo +nightly-2026-08-09 install \
   --path ../airbender-platform/crates/cargo-airbender --no-default-features --locked
 scripts/rebuild_artifacts.sh
 ```
 
 `rebuild_artifacts.sh` runs the sibling `zksync-os/zksync_os/dump_bin.sh --type
-eth-stf-fusaka`, then calls `copy_artifacts.sh`. The copy step:
+eth-stf-fusaka --reproducible`, then calls `copy_artifacts.sh`. Pass `--guest-only`
+to stop after building the sibling distribution; image builds use this path
+before starting the CUDA build. The guest compiler, rust-src, LLVM tools, and
+cargo-binutils run inside cargo-airbender's pinned Docker builder. The sibling
+mount root must be the cluster (`--workspace-root ../..`), as in the pinned
+zksync-os revision. The copy step:
 
 1. Copies the complete `zksync_os/dist/eth_stf` distribution to `artifacts/eth_stf`.
 2. Resolves the producer's Blake environment and copies trusted `.bin`/`.text`
@@ -29,7 +34,8 @@ eth-stf-fusaka`, then calls `copy_artifacts.sh`. The copy step:
    resolved Blake modes, wire formats, and SHA-256 hashes of all runtime artifacts
    (except the metadata file itself).
 
-`copy_artifacts.sh` can reuse an already-built sibling guest distribution.
+`copy_artifacts.sh` can reuse an already-built reproducible sibling guest distribution;
+it rejects a manifest without `reproducible = true`.
 It normally builds `ethereum_prover --release --locked`; set `PROVER_BIN` to an
 absolute path to a matching prebuilt binary to skip that build. Keep the binary
 and all four checkouts at the intended revisions before generating metadata.
@@ -51,9 +57,10 @@ The v2 proof verification command itself needs only the proof and trusted VK.
 [build_docker.sh](build_docker.sh) builds from a filtered sibling-cluster context;
 see the [container README](../docker/ethereum-prover/README.md). It embeds commit
 arguments because `.git` worktree pointers are not portable inside an image.
-The Dockerfile builds both guest and service using CUDA 13.3.1 and
-`nightly-2026-08-09`. Generated ELF/FSV files are included in the image, but are not
-added to Git.
+The host builds the guest reproducibly first. The Dockerfile builds the service
+using CUDA 13.3.1 and `nightly-2026-08-09`, then packages the prebuilt guest and
+trusted FSV files and derives the same VK as native packaging. Generated ELF/FSV
+files are included in the image, but are not added to Git.
 
 `ubuntu_setup.sh` is a legacy machine-provisioning script for the pre-v3 stack;
 it installs CUDA 12.9 and unrelated Bellman/CRS dependencies. Do not use it for

@@ -12,7 +12,6 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- \
     -y --profile minimal --default-toolchain nightly-2026-08-09 \
     --component rust-src --component llvm-tools-preview
-RUN cargo install cargo-binutils --version 0.4.0 --locked
 
 ARG PROVER_DIR=ethereum-prover
 COPY zksync-airbender /src/zksync-airbender
@@ -23,7 +22,6 @@ WORKDIR /src/ethereum-prover
 ARG CUDA_ARCHS="80;89;90;120"
 ARG BUILD_JOBS=8
 ENV CUDAARCHS=${CUDA_ARCHS} CARGO_BUILD_JOBS=${BUILD_JOBS} CMAKE_BUILD_PARALLEL_LEVEL=${BUILD_JOBS}
-RUN cargo install --path ../airbender-platform/crates/cargo-airbender --no-default-features --locked
 RUN cargo build --locked --release -p ethereum_prover --bin ethereum_prover
 
 # Git worktree pointers do not survive relocation; the context builder supplies these SHAs.
@@ -34,7 +32,8 @@ ARG ZKSYNC_AIRBENDER_COMMIT
 ARG RECURSION_UNROLLED_BLAKE=compression
 ARG RECURSION_BRIDGE_BLAKE=compression
 ARG RECURSION_FINAL_BLAKE=compression
-RUN PROVER_BIN=/src/ethereum-prover/target/release/ethereum_prover scripts/rebuild_artifacts.sh
+# The context contains a guest built reproducibly before docker build; no nested Docker.
+RUN PROVER_BIN=/src/ethereum-prover/target/release/ethereum_prover scripts/copy_artifacts.sh
 RUN mkdir -p /out/ethereum_prover/configs /out/artifacts && \
     cp target/release/ethereum_prover /out/ethereum_prover/ && \
     cp ethereum_prover/configs/*.yaml /out/ethereum_prover/configs/ && \

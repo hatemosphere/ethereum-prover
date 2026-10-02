@@ -12,25 +12,36 @@ Place `ethereum-prover`, `zksync-os`, `airbender-platform`, and `zksync-airbende
 next to each other. From the prover repository:
 
 ```sh
+# One-time host prerequisite; Docker must also be available to cargo-airbender.
+RUST_MIN_STACK=1073741824 cargo +nightly-2026-08-09 install \
+  --path ../airbender-platform/crates/cargo-airbender --no-default-features --locked
 scripts/build_docker.sh -t ethereum-prover:v3
 ```
 
-The script sends a filtered cluster-root tar context with the selected prover
-worktree and the three siblings. It excludes build caches, `.env` files, local
-proof data, and generated guest distributions. It also passes the four source
-commits into the build metadata. `DOCKER` may name a Docker-compatible executable
-wrapper when local daemon access requires it.
+The script first runs `scripts/rebuild_artifacts.sh --guest-only`, which invokes
+`dump_bin.sh --type eth-stf-fusaka --reproducible` outside the image build. Its
+pinned Docker builder mounts the whole sibling cluster at `/src`; use the
+zksync-os revision in `stack-revisions.env`, which includes that mount-root fix.
+This step needs Docker and cargo-airbender on the host, but no CUDA toolkit.
+
+The script then sends a filtered cluster-root tar context with the selected prover
+worktree, three siblings, and prebuilt `zksync-os/zksync_os/dist/eth_stf` directory.
+It excludes build caches, `.env` files, and local proof data, and passes the four
+source commits into the build metadata. `DOCKER` may name a wrapper for the image
+build; cargo-airbender invokes `docker` through `PATH`.
 
 The Dockerfile copies the repositories to `/src/<repository>`, preserving relative
-Cargo path dependencies. It installs the sibling `cargo-airbender`, rebuilds the
-Fusaka guest, copies the selected in-tree FSV binaries, and generates the v2 key.
+Cargo path dependencies. It builds the service, copies the prebuilt reproducible
+guest and selected in-tree FSV binaries, and generates the v2 key from those files.
+There is no Docker invocation inside `docker build`. CI prepares the guest on the
+host before building the image; integration-test containers download that same
+kind of prebuilt guest rather than invoking nested Docker.
 `BUILD_JOBS` controls Cargo and CMake parallelism (default 8). Blake modes can be
 selected with the three `RECURSION_*_BLAKE` build arguments; use matching unrolled
 and bridge modes unless intentionally producing a different trusted key.
 
-Use the key generated inside this image for its proofs. Guest binaries embed
-compiler source paths; a native rebuild at the same commits can have a different
-guest hash and VK. To distribute the image's matching key:
+Native and image bundles built from the same reproducible guest and Blake modes
+share one VK. To distribute the image's key:
 
 ```sh
 container_id=$(docker create ethereum-prover:v3)

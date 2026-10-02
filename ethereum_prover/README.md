@@ -11,8 +11,8 @@ and delivers archived proofs to EthProofs from a durable outbox.
 Use the four-repository sibling layout in the [root README](../README.md),
 `nightly-2026-08-09`, and CUDA 13.3.1. The [Dockerfile](../docker/ethereum-prover/Dockerfile)
 uses matching CUDA builder/runtime images on Ubuntu 26.04. Native builds also
-need Clang, CMake, OpenSSL development libraries, `rust-src`, `llvm-tools-preview`,
-`cargo-binutils`, and the sibling `cargo-airbender` tool. See the
+need Clang, CMake, OpenSSL development libraries, Docker, and the sibling
+`cargo-airbender` tool. Guest compiler tools run in its pinned container. See the
 [build scripts](../scripts/README.md) for commands.
 
 ```sh
@@ -20,12 +20,13 @@ need Clang, CMake, OpenSSL development libraries, `rust-src`, `llvm-tools-previe
 RUST_MIN_STACK=1073741824 scripts/rebuild_artifacts.sh
 ```
 
-This builds `dump_bin.sh --type eth-stf-fusaka`, copies the whole guest
+This runs `dump_bin.sh --type eth-stf-fusaka --reproducible`, copies the whole guest
 distribution to `artifacts/eth_stf`, copies the trusted FSV programs to
 `artifacts/fsv`, and generates `recursion_unified_v3_security_100.vk.bin`.
 `build_metadata.txt` records source commits, hashes, resolved Blake modes, and
 `EPROOF01` v2 / `EVKEY001` v2 formats. Do not mix a guest, FSV set, or key from a
-different build.
+different guest or Blake mode. Native and Docker bundles consume the reproducible
+guest distribution and derive the same key.
 
 The guest directory must contain `manifest.toml`, `app.bin`, `app.elf`, and
 `app.text`. The GPU service is linked against CUDA even in `cpu_witness` mode;

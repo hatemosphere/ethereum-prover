@@ -3,6 +3,7 @@ set -euo pipefail
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cluster_dir=$(dirname -- "${repo_dir}")
 prover_dir=$(basename -- "${repo_dir}")
+"${repo_dir}/scripts/rebuild_artifacts.sh" --guest-only
 # A filtered cluster-root tar context also works with Docker's legacy builder.
 # Omit build caches, local proof data, and .env files.
 tar -C "${cluster_dir}" -cf - \
@@ -10,7 +11,7 @@ tar -C "${cluster_dir}" -cf - \
     --exclude='*/.agents' --exclude='*/.data' --exclude='*/.cache' \
     --exclude='*/.env' --exclude='*/.env.*' --exclude='*/artifacts/.build' \
     --exclude='*/proof_verifier_js/ts/wasm' --exclude='*/proof_verifier_js/wasm/pkg' \
-    --exclude='*/dist' --exclude='*/artifacts/eth_stf' --exclude='*/artifacts/fsv' \
+    --exclude='*/artifacts/eth_stf' --exclude='*/artifacts/fsv' \
     "${prover_dir}" zksync-os airbender-platform zksync-airbender \
     | "${DOCKER:-docker}" build -f "${prover_dir}/docker/ethereum-prover/Dockerfile" \
         --build-arg "PROVER_DIR=${prover_dir}" \

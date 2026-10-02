@@ -40,6 +40,10 @@ fi
 for file in manifest.toml app.bin app.elf app.text; do
     test -s "${dist_dir}/${file}" || { echo "Missing guest artifact: ${dist_dir}/${file}" >&2; exit 1; }
 done
+if ! grep -qx 'reproducible = true' "${dist_dir}/manifest.toml"; then
+    echo 'Guest must be built with dump_bin.sh --reproducible' >&2
+    exit 1
+fi
 stems=()
 for mode in "${RECURSION_UNROLLED_BLAKE}" "${RECURSION_BRIDGE_BLAKE}"; do
     stems+=("fsv_unrolled_base_layer_sec_100_${mode}" "fsv_unrolled_recursion_layer_sec_100_${mode}")
@@ -82,6 +86,7 @@ fi
     printf 'airbender-platform=%s\n' "${platform_commit}"
     printf 'zksync-airbender=%s\n' "${airbender_commit}"
     printf 'rust_toolchain=nightly-2026-08-09\nguest_type=eth-stf-fusaka\n'
+    printf 'guest_build=reproducible\n'
     printf 'proof_format=EPROOF01 v2\nverification_key_format=EVKEY001 v2\nsecurity=100\n'
     printf 'blake_unrolled=%s\nblake_bridge=%s\nblake_final=%s\n' \
         "${RECURSION_UNROLLED_BLAKE}" "${RECURSION_BRIDGE_BLAKE}" "${RECURSION_FINAL_BLAKE}"

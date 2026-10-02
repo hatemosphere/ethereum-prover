@@ -18,6 +18,9 @@
 **/.env
 **/.env.*
 **/dist
+!zksync-os/zksync_os/dist
+!zksync-os/zksync_os/dist/eth_stf
+!zksync-os/zksync_os/dist/eth_stf/**
 **/artifacts/.build
 **/artifacts/eth_stf
 **/artifacts/fsv
