@@ -22,6 +22,9 @@ pub struct OutboxRecord {
     pub cycles: u64,
     /// Archived gzip proof (`ProofArchive`).
     pub proof_path: PathBuf,
+    /// Block timestamp (unix seconds), for the block-to-acceptance latency.
+    #[serde(default)]
+    pub block_timestamp: u64,
     #[serde(default)]
     pub attempts: u32,
     #[serde(default)]
@@ -207,6 +210,17 @@ impl SubmissionWorker {
                     }
                     self.next_attempt.remove(&record.block_number);
                     crate::metrics::METRICS.ethproofs_accepted_total.inc();
+                    if record.block_timestamp > 0 {
+                        let latency =
+                            crate::proof_output::unix_now().saturating_sub(record.block_timestamp);
+                        crate::metrics::METRICS
+                            .block_to_proof_accepted
+                            .observe(Duration::from_secs(latency));
+                        tracing::info!(
+                            "Block {}: accepted {latency} s after its timestamp",
+                            record.block_number
+                        );
+                    }
                     self.outbox.remove(record.block_number)?;
                 }
                 Err(SubmitError::Retryable {
@@ -268,6 +282,7 @@ mod tests {
             proving_time_ms: 1000,
             cycles: 42,
             proof_path,
+            block_timestamp: 0,
             attempts: 0,
             last_error: None,
         }

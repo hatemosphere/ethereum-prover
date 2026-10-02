@@ -31,6 +31,9 @@ pub struct ProverMetrics {
     pub ethproofs_accepted_total: Counter<u64>,
     pub ethproofs_quarantined_total: Counter<u64>,
     pub outbox_pending: Gauge<u64>,
+    /// From the block's timestamp until EthProofs accepted its proof.
+    #[metrics(buckets = Buckets::values(&[6.0, 9.0, 12.0, 15.0, 18.0, 24.0, 30.0, 45.0, 60.0, 90.0, 120.0, 300.0, 600.0]), unit = Unit::Seconds)]
+    pub block_to_proof_accepted: Histogram<Duration>,
     pub ethproofs_request_success_total: Counter<u64>,
     pub ethproofs_request_failure_total: Counter<u64>,
     #[metrics(buckets = Buckets::LATENCIES, unit = Unit::Seconds)]

@@ -105,6 +105,11 @@ pub struct EthProverConfig {
     #[config(default_t = None)]
     pub ethproofs_verifier_id: Option<String>,
 
+    /// Verification key whose sha256 (`0x`-prefixed hex) becomes `verifier_id`, as an
+    /// alternative to `ethproofs_verifier_id`; unset by default.
+    #[config(default_t = None)]
+    pub ethproofs_verifier_id_from_key: Option<PathBuf>,
+
     /// Sentry DSN for error reporting.
     #[config(default_t = None)]
     pub sentry_dsn: Option<SecretString>,

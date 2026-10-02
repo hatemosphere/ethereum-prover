@@ -131,6 +131,7 @@ impl LatestSlot {
 struct Job {
     block_number: u64,
     block_hash: B256,
+    block_timestamp: u64,
     input: EthBlockInput,
 }
 
@@ -277,7 +278,7 @@ fn start_submission(
         base_url.parse().context("invalid EthProofs URL")?,
         token,
         cluster_id,
-        config.ethproofs_verifier_id.clone(),
+        verifier_id(config)?,
     )?;
     let client = if dry_run {
         client.dry_run(config.data_dir.join("dry-run"))?
@@ -291,6 +292,29 @@ fn start_submission(
         SubmissionWorker::new(client, outbox, rx).run(),
     ));
     Ok((Some(tx), Some(handle)))
+}
+
+fn verifier_id(config: &EthProverConfig) -> anyhow::Result<Option<String>> {
+    match (
+        &config.ethproofs_verifier_id,
+        &config.ethproofs_verifier_id_from_key,
+    ) {
+        (Some(_), Some(_)) => anyhow::bail!(
+            "set either ethproofs_verifier_id or ethproofs_verifier_id_from_key, not both"
+        ),
+        (Some(id), None) => Ok(Some(id.clone())),
+        (None, Some(key)) => {
+            use sha2::Digest as _;
+            let bytes = std::fs::read(key).with_context(|| {
+                format!("failed to read the verification key {}", key.display())
+            })?;
+            Ok(Some(format!(
+                "0x{}",
+                alloy::hex::encode(sha2::Sha256::digest(bytes))
+            )))
+        }
+        (None, None) => Ok(None),
+    }
 }
 
 async fn create_prover(config: &EthProverConfig) -> anyhow::Result<Prover> {
@@ -342,6 +366,7 @@ async fn intake_chain<H: Heads>(
         let job = Job {
             block_number,
             block_hash: block.header.hash,
+            block_timestamp: block.header.timestamp,
             input: EthBlockInput::new(block, witness),
         };
         if !jobs.send(job).await {
@@ -377,6 +402,7 @@ async fn intake_block(
     let job = Job {
         block_number,
         block_hash: block.header.hash,
+        block_timestamp: block.header.timestamp,
         input: EthBlockInput::new(block, witness),
     };
     if jobs.send(job).await {
@@ -498,6 +524,7 @@ impl Worker {
                 proving_time_ms,
                 cycles,
                 proof_path,
+                block_timestamp: job.block_timestamp,
                 attempts: 0,
                 last_error: None,
             })?;
@@ -569,6 +596,7 @@ mod tests {
         Job {
             block_number,
             block_hash: B256::ZERO,
+            block_timestamp: 0,
             input: EthBlockInput::new(block, Default::default()),
         }
     }
