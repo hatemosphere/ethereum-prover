@@ -15,6 +15,32 @@ struct EncodedVerificationKey {
     expected_chain_hashes: [[u32; 8]; 3],
 }
 
+pub(crate) struct VerificationKey {
+    pub expected_chain_hashes: [[u32; 8]; 3],
+}
+
+pub(crate) fn decode_verification_key(bytes: &[u8]) -> anyhow::Result<VerificationKey> {
+    anyhow::ensure!(
+        bytes.len() >= 10 && bytes[..8] == VERIFICATION_KEY_MAGIC,
+        "not an EthProofs verification key"
+    );
+    anyhow::ensure!(
+        bytes[8] == VERIFICATION_KEY_FORMAT_VERSION && bytes[9] == VERIFICATION_KEY_SECURITY,
+        "unsupported verification key version {} / security {}",
+        bytes[8],
+        bytes[9]
+    );
+    let (decoded, read): (EncodedVerificationKey, usize) =
+        bincode::serde::decode_from_slice(bytes, bincode::config::standard())?;
+    anyhow::ensure!(
+        read == bytes.len(),
+        "trailing bytes after the verification key"
+    );
+    Ok(VerificationKey {
+        expected_chain_hashes: decoded.expected_chain_hashes,
+    })
+}
+
 pub(crate) fn encode_verification_key(
     app_bin_keccak: [u8; 32],
     app_text_keccak: [u8; 32],

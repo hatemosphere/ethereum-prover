@@ -28,6 +28,13 @@ pub enum Command {
         security: Option<ProofSecurity>,
     },
     Run,
+    /// Verifies a gzip EthProofs proof against a v2 verification key and prints the guest's
+    /// public output.
+    Verify {
+        proof: PathBuf,
+        #[arg(long)]
+        key: PathBuf,
+    },
     /// Proves one block from `--input-dir` (`block.json` + `execution_witness.json`, plain or
     /// raw JSON-RPC responses) and writes the gzip EthProofs proof, without submitting it.
     Prove {

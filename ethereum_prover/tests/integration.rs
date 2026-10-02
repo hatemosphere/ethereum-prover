@@ -91,3 +91,44 @@ fn prover_input_matches_eth_runner() {
         eprintln!("{}: {} words match", dir.display(), words.len());
     }
 }
+
+/// Native verification of the exported v2 stream agrees with `verify_artifact` on the same
+/// proof. `FIXTURE_BLOCK_DIRS` (colon separated) hold `proof_v2.bin.gz` and `artifact.json`
+/// written by `prove --artifact-json`; `FIXTURE_KEY` is the v2 key and `FIXTURE_APP_DIR` the
+/// guest program they were made for.
+#[test]
+fn stream_and_artifact_verification_agree() {
+    let (Ok(dirs), Ok(key), Ok(app_dir)) = (
+        std::env::var("FIXTURE_BLOCK_DIRS"),
+        std::env::var("FIXTURE_KEY"),
+        std::env::var("FIXTURE_APP_DIR"),
+    ) else {
+        eprintln!("Skipping. Set FIXTURE_BLOCK_DIRS, FIXTURE_KEY and FIXTURE_APP_DIR to enable.");
+        return;
+    };
+    let app_dir = std::path::PathBuf::from(app_dir);
+    let source = airbender_host::raw::ProgramSource::from_paths(
+        app_dir.join("app.bin").to_string_lossy().into_owned(),
+        Some(app_dir.join("app.text").to_string_lossy().into_owned()),
+    );
+    for dir in dirs.split(':').map(std::path::PathBuf::from) {
+        let artifact: airbender_host::raw::ProofArtifact = serde_json::from_slice(
+            &std::fs::read(dir.join("artifact.json")).expect("read artifact"),
+        )
+        .expect("parse artifact");
+        let native = airbender_host::raw::verify_artifact(&artifact, &source)
+            .unwrap_or_else(|err| panic!("verify_artifact for {}: {err}", dir.display()));
+        let output = ethereum_prover::verification::verify_proof_file(
+            &dir.join("proof_v2.bin.gz"),
+            std::path::Path::new(&key),
+        )
+        .unwrap_or_else(|err| panic!("stream verification for {}: {err:#}", dir.display()));
+        assert_eq!(
+            output[..],
+            native[..8],
+            "public output for {}",
+            dir.display()
+        );
+        eprintln!("{}: public output {output:08x?}", dir.display());
+    }
+}

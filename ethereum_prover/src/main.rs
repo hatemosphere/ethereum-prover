@@ -31,6 +31,13 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    if let Command::Verify { proof, key } = &cli.command {
+        let output = ethereum_prover::verification::verify_proof_file(proof, key)
+            .context("verification failed")?;
+        println!("verified; public output {output:08x?}");
+        return Ok(());
+    }
+
     let config = EthProverConfig::load(&cli.config).context("failed to load config")?;
     let _sentry_guard = init_sentry(&config);
     if let Some(port) = config.prometheus_port {

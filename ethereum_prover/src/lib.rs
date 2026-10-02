@@ -24,6 +24,7 @@ pub mod prover;
 pub(crate) mod tasks;
 pub mod types;
 pub(crate) mod utils;
+pub mod verification;
 pub(crate) mod verification_key_format;
 pub mod verifier_artifacts;
 
@@ -97,7 +98,9 @@ impl Runner {
                 ));
                 (receiver, false)
             }
-            Command::GenerateVerifierArtifacts { .. } | Command::Prove { .. } => {
+            Command::GenerateVerifierArtifacts { .. }
+            | Command::Prove { .. }
+            | Command::Verify { .. } => {
                 unreachable!("one-shot commands return before block stream initialization")
             }
         };

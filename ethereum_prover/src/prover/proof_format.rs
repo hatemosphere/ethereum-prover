@@ -37,6 +37,32 @@ pub fn encode_artifact(artifact: &ProofArtifact) -> anyhow::Result<Vec<u8>> {
     Ok(encode_envelope(proof_words)?)
 }
 
+/// Decodes an uncompressed envelope: the fixed prefix is checked before the body, and the
+/// bytes must be consumed exactly.
+pub fn decode_proof_words(bytes: &[u8]) -> anyhow::Result<Vec<u32>> {
+    anyhow::ensure!(
+        bytes.len() >= 10 && bytes[..8] == PROOF_MAGIC,
+        "not an EthProofs proof envelope"
+    );
+    anyhow::ensure!(
+        bytes[8] == PROOF_FORMAT_VERSION,
+        "unsupported proof envelope version {} (expected {PROOF_FORMAT_VERSION})",
+        bytes[8]
+    );
+    anyhow::ensure!(
+        bytes[9] == PROOF_SECURITY,
+        "unsupported proof security {} (expected {PROOF_SECURITY})",
+        bytes[9]
+    );
+    let (decoded, read): (EncodedProof, usize) =
+        bincode::serde::decode_from_slice(bytes, bincode::config::standard())?;
+    anyhow::ensure!(
+        read == bytes.len(),
+        "trailing bytes after the proof envelope"
+    );
+    Ok(decoded.proof_words)
+}
+
 fn encode_envelope(proof_words: Vec<u32>) -> Result<Vec<u8>, bincode::error::EncodeError> {
     // The outer EthProofs transport still handles gzip + base64. This envelope
     // is only the inner bincode payload, and starts with a fixed magic so
