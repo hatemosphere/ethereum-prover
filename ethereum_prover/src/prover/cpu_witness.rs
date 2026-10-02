@@ -170,20 +170,17 @@ impl TxResultCallback for DebuggerTxCallback {
         tracing::debug!("Fetched receipt for transaction {tx_hash:?}");
 
         if tx_execution_result.status != receipt.status() {
-            tracing::error!(
-                "Transaction {:?} execution status mismatch: STF status = {:?}, Ethereum status = {:?}",
-                tx_hash,
+            self.problems.push(format!(
+                "transaction {tx_hash:?}: STF status {:?}, Ethereum status {:?}",
                 tx_execution_result.status,
                 receipt.status()
-            );
+            ));
         }
         if tx_execution_result.gas_used != receipt.gas_used {
-            tracing::error!(
-                "Transaction {:?} gas used mismatch: STF gas used = {}, Ethereum gas used = {}",
-                tx_hash,
-                tx_execution_result.gas_used,
-                receipt.gas_used
-            );
+            self.problems.push(format!(
+                "transaction {tx_hash:?}: STF gas used {}, Ethereum gas used {}",
+                tx_execution_result.gas_used, receipt.gas_used
+            ));
         }
     }
 }

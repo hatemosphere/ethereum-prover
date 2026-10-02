@@ -163,7 +163,11 @@ impl SubmissionWorker {
 
     async fn submit_due(&mut self) -> anyhow::Result<()> {
         let now = Instant::now();
-        for mut record in self.outbox.pending()? {
+        let pending = self.outbox.pending()?;
+        crate::metrics::METRICS
+            .outbox_pending
+            .set(pending.len() as u64);
+        for mut record in pending {
             if self
                 .next_attempt
                 .get(&record.block_number)
@@ -195,6 +199,7 @@ impl SubmissionWorker {
                         record.attempts
                     );
                     self.next_attempt.remove(&record.block_number);
+                    crate::metrics::METRICS.ethproofs_accepted_total.inc();
                     self.outbox.remove(record.block_number)?;
                 }
                 Err(SubmitError::Retryable {
@@ -220,6 +225,7 @@ impl SubmissionWorker {
                     );
                     record.last_error = Some(reason);
                     self.next_attempt.remove(&record.block_number);
+                    crate::metrics::METRICS.ethproofs_quarantined_total.inc();
                     self.outbox.quarantine(&record)?;
                 }
             }

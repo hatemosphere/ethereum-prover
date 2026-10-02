@@ -23,7 +23,9 @@ pub struct ProofManifest {
     pub block_number: u64,
     pub block_hash: B256,
     pub cycles: u64,
+    /// Reported proving time: prover input recording + proving.
     pub proving_time_ms: u64,
+    pub prover_input_ms: u64,
     pub proof_sha256: String,
     pub proof_bytes: usize,
     pub created_at_unix: u64,
@@ -46,6 +48,7 @@ impl ProofArchive {
         block_hash: B256,
         cycles: u64,
         proving_time_ms: u64,
+        prover_input_ms: u64,
         envelope: &[u8],
     ) -> anyhow::Result<PathBuf> {
         let block_dir = self.dir.join(block_number.to_string());
@@ -59,6 +62,7 @@ impl ProofArchive {
             block_hash,
             cycles,
             proving_time_ms,
+            prover_input_ms,
             proof_sha256: alloy::hex::encode(sha256(&proof)),
             proof_bytes: proof.len(),
             created_at_unix: unix_now(),
@@ -97,7 +101,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let archive = ProofArchive::new(dir.path().to_path_buf());
         let path = archive
-            .store(7, B256::repeat_byte(0xab), 123, 4567, b"envelope")
+            .store(7, B256::repeat_byte(0xab), 123, 4567, 89, b"envelope")
             .unwrap();
         let proof = std::fs::read(&path).unwrap();
         let mut decoded = Vec::new();

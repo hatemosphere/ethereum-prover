@@ -16,6 +16,8 @@ pub struct ProvedBlock {
     pub cycles: u64,
     /// Prover input recording + proving.
     pub proving_time_secs: f64,
+    /// The prover input recording part of `proving_time_secs`.
+    pub prover_input_secs: f64,
 }
 
 #[derive(Debug)]
@@ -83,21 +85,22 @@ impl Prover {
         // The heavy work runs on a blocking thread with the current hub bound, so a panic
         // still lands in Sentry with the block tag.
         let joined = observability::spawn_blocking_on_current_hub(move || {
-            let result = record_prover_input(input)
-                .with_context(|| {
-                    format!("failed to record the prover input for block {block_number}")
-                })
-                .and_then(|words| {
-                    prover
-                        .prove(&words)
-                        .with_context(|| format!("failed to prove block {block_number}"))
-                });
-            (prover, result)
+            let recording = Instant::now();
+            let words = record_prover_input(input).with_context(|| {
+                format!("failed to record the prover input for block {block_number}")
+            });
+            let prover_input_secs = recording.elapsed().as_secs_f64();
+            let result = words.and_then(|words| {
+                prover
+                    .prove(&words)
+                    .with_context(|| format!("failed to prove block {block_number}"))
+            });
+            (prover, result.map(|result| (result, prover_input_secs)))
         })
         .await;
         let proving_time_secs = start.elapsed().as_secs_f64();
 
-        let result = match joined {
+        let (result, prover_input_secs) = match joined {
             Ok((prover, result)) => {
                 if prover.is_poisoned() {
                     tracing::error!("The GPU prover failed on block {block_number}, replacing it");
@@ -128,10 +131,12 @@ impl Prover {
             proof: result.proof,
             cycles: result.program_cycles,
             proving_time_secs,
+            prover_input_secs,
         })
     }
 
     async fn rebuild(&mut self, block_number: u64) -> anyhow::Result<()> {
+        crate::metrics::METRICS.prover_rebuilds_total.inc();
         let app_dir = self.app_dir.clone();
         let worker_threads = self.worker_threads;
         let replacement = observability::spawn_blocking_on_current_hub(move || {

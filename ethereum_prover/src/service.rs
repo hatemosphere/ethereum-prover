@@ -348,7 +348,17 @@ impl Worker {
         METRICS.proof_success_total.inc();
         let cycles = proved.cycles;
         let proving_time_ms = (proved.proving_time_secs * 1000.0) as u64;
-        tracing::info!("Proved block {block_number}: {cycles} cycles in {proving_time_ms} ms");
+        let prover_input_ms = (proved.prover_input_secs * 1000.0) as u64;
+        METRICS
+            .proving_time
+            .observe(Duration::from_secs_f64(proved.proving_time_secs));
+        METRICS
+            .prover_input_duration
+            .observe(Duration::from_secs_f64(proved.prover_input_secs));
+        tracing::info!(
+            "Proved block {block_number}: {cycles} cycles in {proving_time_ms} ms \
+             ({prover_input_ms} ms prover input)"
+        );
 
         let envelope = proved.encode()?.proof_bytes;
         let proof_path = self.archive.store(
@@ -356,6 +366,7 @@ impl Worker {
             job.block_hash,
             cycles,
             proving_time_ms,
+            prover_input_ms,
             &envelope,
         )?;
         if let Some(outbox) = &self.outbox {
@@ -384,7 +395,15 @@ impl Worker {
                     self.cache.clone(),
                 );
                 match generator.debug(block_number, job.input, debugger).await {
-                    Ok(_) => tracing::info!("Receipt comparison for block {block_number} finished"),
+                    Ok(debugger) => {
+                        for problem in debugger.get_problems() {
+                            tracing::error!("Block {block_number}: {problem}");
+                        }
+                        tracing::info!(
+                            "Receipt comparison for block {block_number}: {} mismatches",
+                            debugger.get_problems().len()
+                        );
+                    }
                     Err(debug_err) => {
                         tracing::warn!("Debugging block {block_number} failed: {debug_err:#}")
                     }

@@ -194,12 +194,14 @@ async fn subscribe(ws_url: &Url) -> anyhow::Result<(DynProvider, Subscription<He
 
 impl Heads for HeadWatcher {
     async fn head(&mut self) -> anyhow::Result<u64> {
-        self.fetcher.head().await
+        let head = self.fetcher.head().await?;
+        crate::metrics::METRICS.chain_head.set(head);
+        Ok(head)
     }
 
     async fn wait_above(&mut self, known: u64) -> anyhow::Result<u64> {
         loop {
-            let head = self.fetcher.head().await?;
+            let head = self.head().await?;
             if head > known {
                 return Ok(head);
             }

@@ -19,7 +19,18 @@ pub struct ProverMetrics {
     #[metrics(buckets = Buckets::LATENCIES, unit = Unit::Seconds)]
     pub proof_duration: Histogram<Duration>,
     pub inflight_proof_tasks: Gauge<u64>,
+    /// Prover input recording, part of the reported proving time.
+    #[metrics(buckets = Buckets::LATENCIES, unit = Unit::Seconds)]
+    pub prover_input_duration: Histogram<Duration>,
+    /// Reported proving time: prover input recording + proving.
+    #[metrics(buckets = Buckets::LATENCIES, unit = Unit::Seconds)]
+    pub proving_time: Histogram<Duration>,
+    pub prover_rebuilds_total: Counter<u64>,
+    pub chain_head: Gauge<u64>,
     pub last_processed_block: Gauge<u64>,
+    pub ethproofs_accepted_total: Counter<u64>,
+    pub ethproofs_quarantined_total: Counter<u64>,
+    pub outbox_pending: Gauge<u64>,
     pub ethproofs_request_success_total: Counter<u64>,
     pub ethproofs_request_failure_total: Counter<u64>,
     #[metrics(buckets = Buckets::LATENCIES, unit = Unit::Seconds)]
