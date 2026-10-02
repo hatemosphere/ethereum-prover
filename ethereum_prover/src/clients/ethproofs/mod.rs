@@ -8,7 +8,7 @@ use url::Url;
 use crate::metrics::METRICS;
 
 pub const ETHPROOFS_STAGING_URL: &str = "https://staging--ethproofs.netlify.app/api/v0/";
-pub const ETHPROOFS_PRODUCTION_URL: &str = "https://ethproofs.netlify.app/api/v0/";
+pub const ETHPROOFS_PRODUCTION_URL: &str = "https://ethproofs.org/api/v0/";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -20,14 +20,28 @@ pub enum SubmitError {
         reason: String,
         retry_after: Option<Duration>,
     },
+    /// HTTP 409: the request conflicts with what EthProofs already recorded for the block
+    /// (for `proofs/proved`, the proof was already accepted).
+    Conflict { reason: String },
     /// The server rejected the request; retrying the same request will not help.
     Permanent { reason: String },
+}
+
+/// Outcome of an accepted `proofs/proved` request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Proved {
+    Accepted {
+        proof_id: Option<String>,
+    },
+    /// EthProofs answered 409: it already has a proof of this block from this cluster.
+    AlreadyRecorded,
 }
 
 impl std::fmt::Display for SubmitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Retryable { reason, .. } => write!(f, "retryable: {reason}"),
+            Self::Conflict { reason } => write!(f, "conflict: {reason}"),
             Self::Permanent { reason } => write!(f, "permanent: {reason}"),
         }
     }
@@ -39,7 +53,7 @@ pub struct EthproofsClient {
     base_url: Url,
     auth_token: String,
     cluster_id: u64,
-    verifier_id: String,
+    verifier_id: Option<String>,
     client: reqwest::Client,
 }
 
@@ -56,7 +70,8 @@ struct ProvedRequest<'a> {
     proving_time: u64,
     proving_cycles: u64,
     proof: String,
-    verifier_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    verifier_id: Option<&'a str>,
 }
 
 impl EthproofsClient {
@@ -64,7 +79,7 @@ impl EthproofsClient {
         base_url: Url,
         auth_token: String,
         cluster_id: u64,
-        verifier_id: String,
+        verifier_id: Option<String>,
     ) -> anyhow::Result<Self> {
         anyhow::ensure!(
             base_url.path().ends_with('/'),
@@ -86,11 +101,13 @@ impl EthproofsClient {
     pub async fn queued(&self, block_number: u64) -> Result<(), SubmitError> {
         self.post("proofs/queued", &self.request(block_number))
             .await
+            .map(drop)
     }
 
     pub async fn proving(&self, block_number: u64) -> Result<(), SubmitError> {
         self.post("proofs/proving", &self.request(block_number))
             .await
+            .map(drop)
     }
 
     /// Submits a proof; `gzip_proof` is the archived gzip proof file, sent base64 encoded.
@@ -100,16 +117,24 @@ impl EthproofsClient {
         proving_time_ms: u64,
         proving_cycles: u64,
         gzip_proof: &[u8],
-    ) -> Result<(), SubmitError> {
+    ) -> Result<Proved, SubmitError> {
         let payload = ProvedRequest {
             block_number,
             cluster_id: self.cluster_id,
             proving_time: proving_time_ms,
             proving_cycles,
             proof: base64::engine::general_purpose::STANDARD.encode(gzip_proof),
-            verifier_id: &self.verifier_id,
+            verifier_id: self.verifier_id.as_deref(),
         };
-        self.post("proofs/proved", &payload).await
+        match self.post("proofs/proved", &payload).await {
+            Ok(response) => Ok(Proved::Accepted {
+                proof_id: response
+                    .get("proof_id")
+                    .map(|id| id.as_str().map_or_else(|| id.to_string(), str::to_owned)),
+            }),
+            Err(SubmitError::Conflict { .. }) => Ok(Proved::AlreadyRecorded),
+            Err(err) => Err(err),
+        }
     }
 
     fn request(&self, block_number: u64) -> ProofRequest {
@@ -119,7 +144,12 @@ impl EthproofsClient {
         }
     }
 
-    async fn post<T: Serialize>(&self, path: &str, payload: &T) -> Result<(), SubmitError> {
+    /// One POST; returns the JSON response body (null if it is not JSON).
+    async fn post<T: Serialize>(
+        &self,
+        path: &str,
+        payload: &T,
+    ) -> Result<serde_json::Value, SubmitError> {
         let url = self
             .base_url
             .join(path)
@@ -138,7 +168,7 @@ impl EthproofsClient {
             Ok(response) => {
                 let status = response.status();
                 if status.is_success() {
-                    Ok(())
+                    Ok(response.json().await.unwrap_or_default())
                 } else {
                     let retry_after = response
                         .headers()
@@ -158,7 +188,7 @@ impl EthproofsClient {
         };
         latency.observe();
         match &result {
-            Ok(()) => METRICS.ethproofs_request_success_total.inc(),
+            Ok(_) => METRICS.ethproofs_request_success_total.inc(),
             Err(_) => METRICS.ethproofs_request_failure_total.inc(),
         };
         result
@@ -166,7 +196,9 @@ impl EthproofsClient {
 }
 
 fn classify(status: StatusCode, reason: String, retry_after: Option<Duration>) -> SubmitError {
-    if status.is_server_error()
+    if status == StatusCode::CONFLICT {
+        SubmitError::Conflict { reason }
+    } else if status.is_server_error()
         || matches!(
             status,
             StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_EARLY | StatusCode::TOO_MANY_REQUESTS
@@ -195,7 +227,11 @@ mod tests {
     #[test]
     fn classifies_statuses() {
         let retryable = [500, 502, 503, 408, 425, 429];
-        let permanent = [400, 401, 403, 404, 409, 422];
+        let permanent = [400, 401, 403, 404, 422];
+        assert!(matches!(
+            classify(StatusCode::CONFLICT, String::new(), None),
+            SubmitError::Conflict { .. }
+        ));
         for code in retryable {
             let status = StatusCode::from_u16(code).unwrap();
             assert!(
@@ -221,6 +257,6 @@ mod tests {
     #[test]
     fn base_url_must_be_a_directory() {
         let url = Url::parse("https://example.com/api/v0").unwrap();
-        assert!(EthproofsClient::new(url, String::new(), 1, String::new()).is_err());
+        assert!(EthproofsClient::new(url, String::new(), 1, None).is_err());
     }
 }

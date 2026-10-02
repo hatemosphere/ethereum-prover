@@ -100,9 +100,10 @@ pub struct EthProverConfig {
     #[config(default_t = None)]
     pub ethproofs_url: Option<String>,
 
-    /// Verifier identifier sent with every proof.
-    #[config(default_t = "None".into())]
-    pub ethproofs_verifier_id: String,
+    /// Optional `verifier_id` sent with every proof (the API's vkey/image-id field); omitted
+    /// when unset.
+    #[config(default_t = None)]
+    pub ethproofs_verifier_id: Option<String>,
 
     /// Sentry DSN for error reporting.
     #[config(default_t = None)]

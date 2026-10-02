@@ -8,7 +8,7 @@ use anyhow::Context as _;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
-use crate::clients::ethproofs::{EthproofsClient, SubmitError};
+use crate::clients::ethproofs::{EthproofsClient, Proved, SubmitError};
 
 const RETRY_SCAN_INTERVAL: Duration = Duration::from_secs(15);
 const MIN_RETRY_BACKOFF: Duration = Duration::from_secs(15);
@@ -192,12 +192,19 @@ impl SubmissionWorker {
             };
             record.attempts += 1;
             match outcome {
-                Ok(()) => {
-                    tracing::info!(
-                        "EthProofs accepted the proof of block {} (attempt {})",
-                        record.block_number,
-                        record.attempts
-                    );
+                Ok(proved) => {
+                    match proved {
+                        Proved::Accepted { proof_id } => tracing::info!(
+                            "EthProofs accepted the proof of block {} (attempt {}, proof_id {})",
+                            record.block_number,
+                            record.attempts,
+                            proof_id.as_deref().unwrap_or("?")
+                        ),
+                        Proved::AlreadyRecorded => tracing::info!(
+                            "EthProofs already has the proof of block {} (409)",
+                            record.block_number
+                        ),
+                    }
                     self.next_attempt.remove(&record.block_number);
                     crate::metrics::METRICS.ethproofs_accepted_total.inc();
                     self.outbox.remove(record.block_number)?;
@@ -218,7 +225,7 @@ impl SubmissionWorker {
                     self.next_attempt.insert(record.block_number, now + backoff);
                     self.outbox.put(&record)?;
                 }
-                Err(SubmitError::Permanent { reason }) => {
+                Err(SubmitError::Permanent { reason } | SubmitError::Conflict { reason }) => {
                     tracing::error!(
                         "EthProofs rejected the proof of block {}: {reason}; quarantined",
                         record.block_number
@@ -235,8 +242,14 @@ impl SubmissionWorker {
 }
 
 fn status_update(block_number: u64, status: &str, result: Result<(), SubmitError>) {
-    if let Err(err) = result {
-        tracing::warn!("EthProofs '{status}' update for block {block_number} failed: {err}");
+    match result {
+        Ok(()) => {}
+        Err(SubmitError::Conflict { reason }) => {
+            tracing::debug!("EthProofs '{status}' update for block {block_number}: {reason}")
+        }
+        Err(err) => {
+            tracing::warn!("EthProofs '{status}' update for block {block_number} failed: {err}")
+        }
     }
 }
 
@@ -262,7 +275,7 @@ mod tests {
 
     async fn client(server: &MockServer) -> EthproofsClient {
         let url = url::Url::parse(&format!("{}/api/v0/", server.uri())).unwrap();
-        EthproofsClient::new(url, "token".into(), 7, "verifier".into()).unwrap()
+        EthproofsClient::new(url, "token".into(), 7, None).unwrap()
     }
 
     async fn run_once(client: EthproofsClient, outbox: Outbox) {
@@ -326,6 +339,31 @@ mod tests {
             serde_json::from_slice(&std::fs::read(dir.path().join("quarantine/21.json")).unwrap())
                 .unwrap();
         assert!(quarantined.last_error.unwrap().contains("bad proof"));
+    }
+
+    #[tokio::test]
+    async fn the_payload_matches_the_api_and_a_conflict_counts_as_accepted() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v0/proofs/proved"))
+            .and(wiremock::matchers::body_json(serde_json::json!({
+                "block_number": 40,
+                "cluster_id": 7,
+                "proving_time": 1000,
+                "proving_cycles": 42,
+                "proof": "Z3ppcC1wcm9vZg==",
+            })))
+            .respond_with(ResponseTemplate::new(409).set_body_string("already proved"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let outbox = Outbox::new(dir.path()).unwrap();
+        outbox.put(&record(dir.path(), 40)).unwrap();
+
+        run_once(client(&server).await, outbox.clone()).await;
+        assert!(outbox.pending().unwrap().is_empty());
+        assert!(!dir.path().join("quarantine/40.json").exists());
     }
 
     #[tokio::test]
