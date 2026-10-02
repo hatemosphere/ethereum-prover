@@ -50,13 +50,10 @@ impl Runner {
                 println!("verified; public output {output:08x?}");
                 Ok(())
             }
-            Command::Run { start: None, .. } => {
+            Command::Run { tip: true, .. } => {
                 service::run(config, service::Work::Chain(block_stream::BlockRange::Tip)).await
             }
-            Command::Run {
-                start: Some(start),
-                end,
-            } => {
+            Command::Run { start, end, .. } => {
                 service::run(
                     config,
                     service::Work::Chain(block_stream::BlockRange::Range { start, end }),

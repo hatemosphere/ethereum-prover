@@ -39,6 +39,9 @@ pub enum CachePolicy {
 #[serde(rename_all = "snake_case")]
 pub enum EthProofsSubmission {
     Off,
+    /// Run the whole submission path but write each request to `<data_dir>/dry-run/`
+    /// instead of sending it.
+    DryRun,
     Staging,
     Prod,
 }
@@ -47,7 +50,9 @@ impl EthProofsSubmission {
     pub fn enabled(&self) -> bool {
         match self {
             EthProofsSubmission::Off => false,
-            EthProofsSubmission::Staging | EthProofsSubmission::Prod => true,
+            EthProofsSubmission::DryRun
+            | EthProofsSubmission::Staging
+            | EthProofsSubmission::Prod => true,
         }
     }
 

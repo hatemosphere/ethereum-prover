@@ -367,6 +367,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dry_run_writes_the_requests_and_drains_the_outbox() {
+        let dir = tempfile::tempdir().unwrap();
+        let outbox = Outbox::new(dir.path()).unwrap();
+        outbox.put(&record(dir.path(), 50)).unwrap();
+        let url = url::Url::parse("https://ethproofs.org/api/v0/").unwrap();
+        let client = EthproofsClient::new(url, String::new(), 7, None)
+            .unwrap()
+            .dry_run(dir.path().join("dry-run"))
+            .unwrap();
+
+        run_once(client, outbox.clone()).await;
+        assert!(outbox.pending().unwrap().is_empty());
+        let request: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(dir.path().join("dry-run/50.proved.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(request["url"], "https://ethproofs.org/api/v0/proofs/proved");
+        assert_eq!(request["body"]["proving_cycles"], 42);
+        assert_eq!(request["body"]["proof"], "Z3ppcC1wcm9vZg==");
+    }
+
+    #[tokio::test]
     async fn a_restart_resubmits_pending_records() {
         let dir = tempfile::tempdir().unwrap();
         let outbox = Outbox::new(dir.path()).unwrap();

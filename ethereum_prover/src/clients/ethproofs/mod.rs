@@ -55,6 +55,7 @@ pub struct EthproofsClient {
     cluster_id: u64,
     verifier_id: Option<String>,
     client: reqwest::Client,
+    dry_run_dir: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Serialize)]
@@ -95,7 +96,16 @@ impl EthproofsClient {
             cluster_id,
             verifier_id,
             client,
+            dry_run_dir: None,
         })
+    }
+
+    /// Writes every request to `dir` as `<block>.<endpoint>.json` (`{"url", "body"}`) instead
+    /// of sending it, and answers as an accepting server would.
+    pub fn dry_run(mut self, dir: std::path::PathBuf) -> anyhow::Result<Self> {
+        std::fs::create_dir_all(&dir)?;
+        self.dry_run_dir = Some(dir);
+        Ok(self)
     }
 
     pub async fn queued(&self, block_number: u64) -> Result<(), SubmitError> {
@@ -156,6 +166,9 @@ impl EthproofsClient {
             .map_err(|err| SubmitError::Permanent {
                 reason: format!("invalid endpoint {path}: {err}"),
             })?;
+        if let Some(dir) = &self.dry_run_dir {
+            return dry_run_write(dir, path, url, payload);
+        }
         let latency = METRICS.ethproofs_request_duration.start();
         let result = match self
             .client
@@ -193,6 +206,30 @@ impl EthproofsClient {
         };
         result
     }
+}
+
+fn dry_run_write<T: Serialize>(
+    dir: &std::path::Path,
+    path: &str,
+    url: Url,
+    payload: &T,
+) -> Result<serde_json::Value, SubmitError> {
+    let body = serde_json::to_value(payload).map_err(|err| SubmitError::Permanent {
+        reason: format!("cannot serialize {path}: {err}"),
+    })?;
+    let block_number = body["block_number"].as_u64().unwrap_or_default();
+    let endpoint = path.rsplit('/').next().unwrap_or(path);
+    let file = dir.join(format!("{block_number}.{endpoint}.json"));
+    let request = serde_json::json!({ "url": url.as_str(), "body": body });
+    crate::utils::write_atomic(
+        &file,
+        &serde_json::to_vec_pretty(&request).unwrap_or_default(),
+    )
+    .map_err(|err| SubmitError::Retryable {
+        reason: format!("dry run: cannot write {}: {err}", file.display()),
+        retry_after: None,
+    })?;
+    Ok(serde_json::json!({ "proof_id": "dry-run" }))
 }
 
 fn classify(status: StatusCode, reason: String, retry_after: Option<Duration>) -> SubmitError {

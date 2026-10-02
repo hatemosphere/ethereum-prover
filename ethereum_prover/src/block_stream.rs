@@ -42,12 +42,15 @@ impl BlockSelector {
     }
 }
 
-/// Which blocks to prove: always the newest owned block (`Tip`), or every owned block of a
-/// range in order (`Range`, unbounded `end` follows the chain).
+/// Which blocks to prove: every owned block of a range in order (`Range`; no `start` means
+/// the current head, no `end` follows the chain), or only the newest owned block (`Tip`).
 #[derive(Debug, Clone, Copy)]
 pub enum BlockRange {
+    Range {
+        start: Option<u64>,
+        end: Option<u64>,
+    },
     Tip,
-    Range { start: u64, end: Option<u64> },
 }
 
 pub trait Heads: Send {
@@ -93,9 +96,14 @@ impl<H: Heads> BlockStream<H> {
                 }
             },
             BlockRange::Range { start, end } => {
-                let block = match self.last_selected {
-                    Some(last) => last + self.selector.block_mod,
-                    None => self.selector.first_at_or_above(start),
+                let block = match (self.last_selected, start) {
+                    (Some(last), _) => last + self.selector.block_mod,
+                    (None, Some(start)) => self.selector.first_at_or_above(start),
+                    (None, None) => {
+                        let head = self.heads.head().await?;
+                        self.last_head = Some(head);
+                        self.selector.first_at_or_above(head)
+                    }
                 };
                 if end.is_some_and(|end| block > end) {
                     return Ok(None);
@@ -265,6 +273,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn range_without_start_begins_at_the_head() {
+        let mut stream = stream(
+            2,
+            1,
+            BlockRange::Range {
+                start: None,
+                end: None,
+            },
+            &[100, 100, 103],
+        );
+        // The head is 100, so the first owned block is 101, which waits for head 103.
+        assert_eq!(stream.next_block().await.unwrap(), Some(101));
+        assert_eq!(stream.next_block().await.unwrap(), Some(103));
+    }
+
+    #[tokio::test]
     async fn tip_takes_the_newest_owned_block_and_never_repeats() {
         let mut stream = stream(4, 1, BlockRange::Tip, &[100, 100, 101, 104, 106, 113]);
         assert_eq!(stream.next_block().await.unwrap(), Some(97));
@@ -281,7 +305,7 @@ mod tests {
             3,
             0,
             BlockRange::Range {
-                start: 10,
+                start: Some(10),
                 end: Some(20),
             },
             &[13, 14, 16, 30],

@@ -1,9 +1,13 @@
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::Duration;
 
 use alloy::primitives::B256;
 use anyhow::Context as _;
 use smart_config::value::ExposeSecret as _;
-use tokio::sync::mpsc;
+use tokio::sync::{Notify, mpsc};
 use url::Url;
 
 use crate::{
@@ -21,13 +25,107 @@ use crate::{
         types::EthBlockInput,
     },
     submission::{Outbox, OutboxRecord, SubmissionEvent, SubmissionWorker},
-    types::{CachePolicy, Mode, OnFailure},
+    types::{CachePolicy, EthProofsSubmission, Mode, OnFailure},
 };
 
 /// What to process: the chain (tip or range) or one block.
 pub enum Work {
     Chain(BlockRange),
     Block(u64),
+}
+
+/// Intake-to-worker hand-off. `Fifo` keeps every block in order and makes the intake wait
+/// when it is full; `Latest` (tip mode) keeps only the newest block, replacing a queued
+/// older one, and reports `queued` when proving actually starts.
+enum JobSender {
+    Fifo(mpsc::Sender<Job>),
+    Latest(Arc<LatestSlot>),
+}
+
+enum JobReceiver {
+    Fifo(mpsc::Receiver<Job>),
+    Latest(Arc<LatestSlot>),
+}
+
+fn job_queue(range: Option<BlockRange>, prefetch: usize) -> (JobSender, JobReceiver) {
+    if matches!(range, Some(BlockRange::Tip)) {
+        let slot = Arc::new(LatestSlot::default());
+        (JobSender::Latest(slot.clone()), JobReceiver::Latest(slot))
+    } else {
+        let (tx, rx) = mpsc::channel(prefetch.max(1));
+        (JobSender::Fifo(tx), JobReceiver::Fifo(rx))
+    }
+}
+
+impl JobSender {
+    /// Hands over a job; false once the worker is gone.
+    async fn send(&self, job: Job) -> bool {
+        match self {
+            Self::Fifo(tx) => tx.send(job).await.is_ok(),
+            Self::Latest(slot) => {
+                let block_number = job.block_number;
+                if let Some(superseded) = slot.put(job) {
+                    tracing::info!("Block {block_number} supersedes queued block {superseded}");
+                }
+                true
+            }
+        }
+    }
+
+    fn reports_queued(&self) -> bool {
+        matches!(self, Self::Fifo(_))
+    }
+}
+
+impl Drop for JobSender {
+    fn drop(&mut self) {
+        if let Self::Latest(slot) = self {
+            slot.close();
+        }
+    }
+}
+
+impl JobReceiver {
+    async fn next(&mut self) -> Option<Job> {
+        match self {
+            Self::Fifo(rx) => rx.recv().await,
+            Self::Latest(slot) => slot.take().await,
+        }
+    }
+}
+
+#[derive(Default)]
+struct LatestSlot {
+    job: Mutex<Option<Job>>,
+    closed: AtomicBool,
+    notify: Notify,
+}
+
+impl LatestSlot {
+    /// Stores the job and returns the block number of the job it replaced.
+    fn put(&self, job: Job) -> Option<u64> {
+        let replaced = self.job.lock().unwrap().replace(job);
+        self.notify.notify_one();
+        replaced.map(|job| job.block_number)
+    }
+
+    fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        self.notify.notify_one();
+    }
+
+    /// The queued job, waiting for one; `None` once closed and empty.
+    async fn take(&self) -> Option<Job> {
+        loop {
+            if let Some(job) = self.job.lock().unwrap().take() {
+                return Some(job);
+            }
+            if self.closed.load(Ordering::SeqCst) {
+                return None;
+            }
+            self.notify.notified().await;
+        }
+    }
 }
 
 struct Job {
@@ -66,7 +164,13 @@ pub async fn run(config: EthProverConfig, work: Work) -> anyhow::Result<()> {
         .transpose()?;
 
     let (events, submission) = start_submission(&config)?;
-    let (jobs_tx, jobs_rx) = mpsc::channel(config.prefetch.max(1));
+    let (jobs_tx, jobs_rx) = job_queue(
+        match &work {
+            Work::Chain(range) => Some(*range),
+            Work::Block(_) => None,
+        },
+        config.prefetch,
+    );
 
     let intake = match work {
         Work::Chain(range) => {
@@ -149,13 +253,21 @@ fn start_submission(
     if !config.ethproofs_submission.enabled() {
         return Ok((None, None));
     }
-    let token = config
-        .ethproofs_token
-        .as_ref()
-        .context("ethproofs_token is required when EthProofs submission is enabled")?;
-    let cluster_id = config
-        .ethproofs_cluster_id
-        .context("ethproofs_cluster_id is required when EthProofs submission is enabled")?;
+    let dry_run = matches!(config.ethproofs_submission, EthProofsSubmission::DryRun);
+    let token = match (&config.ethproofs_token, dry_run) {
+        (Some(token), _) => token.expose_secret().to_string(),
+        (None, true) => String::new(),
+        (None, false) => {
+            anyhow::bail!("ethproofs_token is required when EthProofs submission is enabled")
+        }
+    };
+    let cluster_id = match (config.ethproofs_cluster_id, dry_run) {
+        (Some(cluster_id), _) => cluster_id,
+        (None, true) => 0,
+        (None, false) => {
+            anyhow::bail!("ethproofs_cluster_id is required when EthProofs submission is enabled")
+        }
+    };
     let base_url = match &config.ethproofs_url {
         Some(url) => url.clone(),
         None if config.ethproofs_submission.is_staging() => ETHPROOFS_STAGING_URL.to_string(),
@@ -163,10 +275,15 @@ fn start_submission(
     };
     let client = EthproofsClient::new(
         base_url.parse().context("invalid EthProofs URL")?,
-        token.expose_secret().to_string(),
+        token,
         cluster_id,
         config.ethproofs_verifier_id.clone(),
     )?;
+    let client = if dry_run {
+        client.dry_run(config.data_dir.join("dry-run"))?
+    } else {
+        client
+    };
     let outbox = Outbox::new(&config.data_dir.join("outbox"))?;
     let (tx, rx) = mpsc::unbounded_channel();
     let handle = tokio::spawn(observability::bind_task(
@@ -194,7 +311,7 @@ async fn intake_chain<H: Heads>(
     fetcher: Fetcher,
     cache: CacheStorage,
     cache_policy: CachePolicy,
-    jobs: mpsc::Sender<Job>,
+    jobs: JobSender,
     events: Option<mpsc::UnboundedSender<SubmissionEvent>>,
 ) -> anyhow::Result<()> {
     loop {
@@ -227,10 +344,12 @@ async fn intake_chain<H: Heads>(
             block_hash: block.header.hash,
             input: EthBlockInput::new(block, witness),
         };
-        if jobs.send(job).await.is_err() {
+        if !jobs.send(job).await {
             return Ok(());
         }
-        send(&events, SubmissionEvent::Queued(block_number));
+        if jobs.reports_queued() {
+            send(&events, SubmissionEvent::Queued(block_number));
+        }
     }
 }
 
@@ -238,7 +357,7 @@ async fn intake_block(
     block_number: u64,
     fetcher: Option<Fetcher>,
     cache: CacheStorage,
-    jobs: mpsc::Sender<Job>,
+    jobs: JobSender,
     events: Option<mpsc::UnboundedSender<SubmissionEvent>>,
 ) -> anyhow::Result<()> {
     let (block, witness) = match cache.load_block(block_number)? {
@@ -260,7 +379,7 @@ async fn intake_block(
         block_hash: block.header.hash,
         input: EthBlockInput::new(block, witness),
     };
-    if jobs.send(job).await.is_ok() {
+    if jobs.send(job).await {
         send(&events, SubmissionEvent::Queued(block_number));
     }
     Ok(())
@@ -285,9 +404,13 @@ struct Worker {
 }
 
 impl Worker {
-    async fn run(mut self, mut jobs: mpsc::Receiver<Job>) -> anyhow::Result<()> {
-        while let Some(job) = jobs.recv().await {
+    async fn run(mut self, mut jobs: JobReceiver) -> anyhow::Result<()> {
+        let queued_on_take = matches!(jobs, JobReceiver::Latest(_));
+        while let Some(job) = jobs.next().await {
             let block_number = job.block_number;
+            if queued_on_take {
+                send(&self.events, SubmissionEvent::Queued(block_number));
+            }
             let result = observability::bind_block(self.mode_name(), block_number, async {
                 match self.mode {
                     Mode::GpuProve => self.prove(job).await,
@@ -414,5 +537,60 @@ impl Worker {
         let words = generator.generate_witness(block_number, job.input).await?;
         tracing::info!("Block {block_number}: {} prover input words", words.len());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn job(block_number: u64) -> Job {
+        let block: alloy::rpc::types::Block = serde_json::from_value(serde_json::json!({
+            "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "sha3Uncles": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "miner": "0x0000000000000000000000000000000000000000",
+            "stateRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "transactionsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "receiptsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "logsBloom": format!("0x{}", "00".repeat(256)),
+            "difficulty": "0x0",
+            "number": format!("{block_number:#x}"),
+            "gasLimit": "0x0",
+            "gasUsed": "0x0",
+            "timestamp": "0x0",
+            "extraData": "0x",
+            "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "nonce": "0x0000000000000000",
+            "uncles": [],
+            "transactions": [],
+        }))
+        .unwrap();
+        Job {
+            block_number,
+            block_hash: B256::ZERO,
+            input: EthBlockInput::new(block, Default::default()),
+        }
+    }
+
+    #[tokio::test]
+    async fn latest_slot_keeps_only_the_newest_job() {
+        let slot = Arc::new(LatestSlot::default());
+        assert_eq!(slot.put(job(1)), None);
+        assert_eq!(slot.put(job(2)), Some(1));
+        assert_eq!(slot.take().await.map(|job| job.block_number), Some(2));
+
+        let waiter = tokio::spawn({
+            let slot = slot.clone();
+            async move { slot.take().await.map(|job| job.block_number) }
+        });
+        tokio::task::yield_now().await;
+        slot.put(job(3));
+        assert_eq!(waiter.await.unwrap(), Some(3));
+
+        slot.put(job(4));
+        slot.close();
+        assert_eq!(slot.take().await.map(|job| job.block_number), Some(4));
+        assert!(slot.take().await.is_none());
     }
 }

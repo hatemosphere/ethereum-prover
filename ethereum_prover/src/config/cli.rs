@@ -27,13 +27,16 @@ pub enum Command {
         #[arg(long)]
         security: Option<ProofSecurity>,
     },
-    /// Follows the chain and proves the newest owned block, or with `--start` every owned
-    /// block from `--start` to `--end` (or onwards).
+    /// Follows the chain and proves every owned block in order, from `--start` (default: the
+    /// current head) to `--end` (default: onwards). With `--tip`, proves only the newest owned
+    /// block and drops queued blocks that a newer one supersedes.
     Run {
-        #[arg(long)]
+        #[arg(long, conflicts_with = "tip")]
         start: Option<u64>,
-        #[arg(long, requires = "start")]
+        #[arg(long, conflicts_with = "tip")]
         end: Option<u64>,
+        #[arg(long)]
+        tip: bool,
     },
     /// Proves the block in `--input-dir` once to warm up and then `--runs` more times with the
     /// same prover, reporting prover input, proving and total time per run.
