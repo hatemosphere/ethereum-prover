@@ -1,6 +1,6 @@
 {
   "name": "@matterlabs/ethproofs-airbender-verifier",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Airbender ZK Proof Verifier for EthProofs",
   "license": "(MIT OR Apache-2.0)",
   "repository": {
@@ -17,7 +17,6 @@
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
-  "readme": "README.md",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
