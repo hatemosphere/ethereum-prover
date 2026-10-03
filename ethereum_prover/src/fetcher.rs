@@ -84,21 +84,24 @@ impl Fetcher {
             self.retry,
             &format!("fetch block {block_number} and its execution witness"),
             || async {
-                let block = self
-                    .provider
-                    .get_block_by_number(BlockNumberOrTag::Number(block_number))
-                    .full()
-                    .await?
-                    .with_context(|| format!("block {block_number} not found"))?;
-                let witness = match self.format {
-                    WitnessFormat::Reth => {
-                        self.provider
-                            .debug_execution_witness(BlockNumberOrTag::Number(block_number))
-                            .await?
-                    }
-                    WitnessFormat::Geth => self.geth_witness(block_number).await?,
+                let block = async {
+                    self.provider
+                        .get_block_by_number(BlockNumberOrTag::Number(block_number))
+                        .full()
+                        .await?
+                        .with_context(|| format!("block {block_number} not found"))
                 };
-                Ok((block, witness))
+                let witness = async {
+                    anyhow::Ok(match self.format {
+                        WitnessFormat::Reth => {
+                            self.provider
+                                .debug_execution_witness(BlockNumberOrTag::Number(block_number))
+                                .await?
+                        }
+                        WitnessFormat::Geth => self.geth_witness(block_number).await?,
+                    })
+                };
+                tokio::try_join!(block, witness)
             },
         )
         .await

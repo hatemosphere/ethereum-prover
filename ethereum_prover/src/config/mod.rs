@@ -64,6 +64,10 @@ pub struct EthProverConfig {
     #[config(default_t = 2)]
     pub prefetch: usize,
 
+    /// CPU replay threads per GPU job; unset keeps the prover default.
+    #[config(default_t = None)]
+    pub replay_threads: Option<usize>,
+
     /// EthProofs submission target.
     #[config(default_t = EthProofsSubmission::Off)]
     #[config(with = Serde![str])]

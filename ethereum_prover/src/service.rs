@@ -321,8 +321,9 @@ async fn create_prover(config: &EthProverConfig) -> anyhow::Result<Prover> {
     tracing::info!("Creating the GPU prover");
     let app_dir = config.app_dir.clone();
     let security = config.security;
+    let replay_threads = config.replay_threads;
     let prover = observability::spawn_blocking_on_current_hub(move || {
-        Prover::new(app_dir.as_path(), None, security)
+        Prover::new(app_dir.as_path(), replay_threads, security)
     })
     .await
     .context("prover creation panicked")??;
@@ -349,8 +350,15 @@ async fn intake_chain<H: Heads>(
                 return Ok(());
             }
         };
+        let fetching = std::time::Instant::now();
         let (block, witness) = match fetcher.block_with_witness(block_number).await {
-            Ok(fetched) => fetched,
+            Ok(fetched) => {
+                tracing::info!(
+                    "Fetched block {block_number} in {} ms",
+                    fetching.elapsed().as_millis()
+                );
+                fetched
+            }
             Err(err) => {
                 observability::capture_anyhow(&err);
                 tracing::error!("Skipping block {block_number}: {err:#}");

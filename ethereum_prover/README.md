@@ -105,6 +105,7 @@ working directory.
 | `poll_interval_ms` | Head polling interval, default 1000. |
 | `rpc_attempts` | Attempts per RPC operation, default 3. |
 | `prefetch` | Blocks queued ahead of the worker, default 2 (minimum effective capacity 1). |
+| `replay_threads` | CPU replay threads per GPU job; default null keeps the prover default (8). |
 | `cache_policy` | `off`, `on_failure` (default), or `always`; governs retention in streaming operation. Explicit `block` commands populate the cache on a miss. |
 | `ethproofs_submission` | `off` (default), `staging`, or `prod`. |
 | `ethproofs_url` | Optional override of the staging/production API base URL; default null. |
