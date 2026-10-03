@@ -78,8 +78,9 @@ async fn prove_one(
     let block_number = input.block_header.number;
     let app_dir = config.app_dir.clone();
     let security = config.security;
+    let replay_threads = config.replay_threads;
     let mut gpu_prover = observability::spawn_blocking_on_current_hub(move || {
-        Prover::new(app_dir.as_path(), None, security)
+        Prover::new(app_dir.as_path(), replay_threads, security)
     })
     .await
     .context("prover initialization task panicked")??;
@@ -112,9 +113,10 @@ async fn bench(
     let block_number = input.block_header.number;
     let app_dir = config.app_dir.clone();
     let security = config.security;
+    let replay_threads = config.replay_threads;
     let init = std::time::Instant::now();
     let mut gpu_prover = observability::spawn_blocking_on_current_hub(move || {
-        Prover::new(app_dir.as_path(), None, security)
+        Prover::new(app_dir.as_path(), replay_threads, security)
     })
     .await
     .context("prover initialization task panicked")??;
