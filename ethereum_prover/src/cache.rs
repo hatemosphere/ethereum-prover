@@ -78,7 +78,7 @@ impl CacheStorage {
         let tx_hash = receipt.transaction_hash;
         let receipt_path = paths.receipts_dir.join(format!("{:?}.json", tx_hash));
         let data = serde_json::to_string_pretty(&receipt)?;
-        std::fs::write(receipt_path, data)?;
+        crate::utils::write_atomic(&receipt_path, data.as_bytes())?;
         Ok(())
     }
 
@@ -127,7 +127,7 @@ impl CacheStorage {
     fn write_rpc_block(&self, block_number: u64, block: &RpcBlock) -> anyhow::Result<()> {
         let paths = self.ensure_block_dir(block_number)?;
         let data = serde_json::to_string_pretty(block)?;
-        std::fs::write(paths.block_json, data)?;
+        crate::utils::write_atomic(&paths.block_json, data.as_bytes())?;
         Ok(())
     }
 
@@ -151,7 +151,7 @@ impl CacheStorage {
     ) -> anyhow::Result<()> {
         let paths = self.ensure_block_dir(block_number)?;
         let data = serde_json::to_string_pretty(witness)?;
-        std::fs::write(paths.execution_witness_json, data)?;
+        crate::utils::write_atomic(&paths.execution_witness_json, data.as_bytes())?;
         Ok(())
     }
 }

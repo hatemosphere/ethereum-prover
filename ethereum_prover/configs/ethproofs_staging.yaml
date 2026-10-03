@@ -1,11 +1,19 @@
-# Use this config to submit proofs to EthProofs staging
-
+# Run from ethereum_prover/; environment variables override these values.
 eth_prover:
-  app_bin_path: "../artifacts/app.bin"
+  app_dir: "../artifacts/eth_stf"
+  data_dir: ".data"
   mode: "gpu_prove"
   security: "security_100"
   cache_policy: "on_failure"
+  # Set eth_prover_rpc_url in the environment (debug_executionWitness must be enabled).
+  ws_url: null
+  witness_format: "reth" # reth or geth
+  poll_interval_ms: 1000
+  rpc_attempts: 3
+  prefetch: 2
   ethproofs_submission: "staging"
+  ethproofs_url: null # Override the built-in staging/production API URL if needed.
+  ethproofs_verifier_id: "None" # Set the registered v3 verifier ID before submitting.
   block_mod: 10
   prover_id: 0
   on_failure: "continue"

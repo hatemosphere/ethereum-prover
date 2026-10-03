@@ -1,132 +1,106 @@
-import init, {
-  deserialize_proof_bytes,
-  InitOutput,
-  WasmVerifier
-} from "../wasm/pkg/proof_verifier_wasm";
+import { WasmVerifier, deserialize_proof_bytes } from "../wasm/pkg/proof_verifier_wasm.js";
 
-/**
- * Opaque handle returned after deserializing a proof blob for verification.
- */
-export type ProofHandle = ReturnType<typeof deserialize_proof_bytes>;
+/** Decoded proof; release it with `free()`. */
+export type ProofHandle = { free(): void };
 
-/**
- * Result of a proof verification run.
- */
 export type VerificationResult = {
-  /** True if the proof is valid. */
   success: boolean;
-  /** Error details reported by the verifier, or null on success. */
   error: string | null;
+  /** Eight verified words on success; null on failure. */
+  publicOutput: Uint32Array | null;
 };
 
 export type VerificationKey = Uint8Array;
 
-type SingleFileVerifierOptions = {
-  /** Single-file verification key. Its embedded security level must match verified proofs. */
+export type VerifierOptions = {
+  /** Trusted EVKEY001 v2 key for the guest and security 100. */
   verificationKey: VerificationKey;
-  setupBin?: never;
-  layoutBin?: never;
 };
 
-type LegacySingleVerifierOptions = {
-  /** Legacy 80-bit setup data for existing split-key deployments. */
-  setupBin: Uint8Array;
-  /** Legacy 80-bit layout data for existing split-key deployments. */
-  layoutBin: Uint8Array;
-  verificationKey?: never;
-};
-
-/**
- * Verifier configuration with explicit verification keys.
- *
- * These correspond to the precomputed verifier artifacts used by the
- * Ethereum STF ZK proof system and must match the proof's circuit version.
- */
-export type VerifierOptions =
-  | SingleFileVerifierOptions
-  | LegacySingleVerifierOptions;
-
-/**
- * Verifier API for Ethereum STF ZK proofs submitted to EthProofs.
- */
 export type Verifier = {
-  /**
-   * Deserializes a proof into an internal handle suitable for verification.
-   * 
-   * @param proofBytes Raw proof bytes as submitted to EthProofs.
-   * @returns ProofHandle for use in verifyProof.
-   */
-  deserializeProofBytes: (proofBytes: Uint8Array) => ProofHandle;
-  /**
-   * Verifies a previously deserialized proof handle.
-   * 
-   * @param handle ProofHandle obtained from deserializeProofBytes.
-   * @returns VerificationResult describing success/failure.
-   */
-  verifyProof: (handle: ProofHandle) => VerificationResult;
+  /** Decode a gzip EPROOF01 v2 proof. Throws on invalid input. */
+  deserializeProofBytes(proofBytes: Uint8Array): ProofHandle;
+  verifyProof(handle: ProofHandle, expectedOutput?: Uint32Array): VerificationResult;
+  /** Release the verifier. */
+  free(): void;
 };
 
-let initPromise: Promise<InitOutput> | null = null;
+type Proof = ReturnType<typeof deserialize_proof_bytes>;
 
-function ensureInit(): Promise<InitOutput> {
-  if (!initPromise) {
-    initPromise = init();
-  }
-  return initPromise;
+function failure(error: unknown): VerificationResult {
+  return {
+    success: false,
+    error: error instanceof Error ? error.message : String(error),
+    publicOutput: null
+  };
 }
 
-function resultFromWasm(result: unknown): VerificationResult {
-  const typed = result as {
-    success: boolean;
-    error: () => string | null;
-  };
+class Handle implements ProofHandle {
+  constructor(public proof?: Proof) {}
 
-  return {
-    success: typed.success,
-    error: typed.error()
-  };
+  free(): void {
+    this.proof?.free();
+    this.proof = undefined;
+  }
 }
 
 class VerifierImpl implements Verifier {
-  constructor(private readonly inner: WasmVerifier) {}
+  private inner?: WasmVerifier;
 
-  deserializeProofBytes(proofBytes: Uint8Array): ProofHandle {
-    return deserialize_proof_bytes(proofBytes);
+  constructor(key: Uint8Array) {
+    this.inner = WasmVerifier.fromKey(key);
   }
 
-  verifyProof(handle: ProofHandle): VerificationResult {
-    return resultFromWasm(this.inner.verifyProof(handle));
+  deserializeProofBytes(proofBytes: Uint8Array): ProofHandle {
+    if (!this.inner) throw new Error("verifier has been freed");
+    return new Handle(deserialize_proof_bytes(proofBytes));
+  }
+
+  verifyProof(handle: ProofHandle, expectedOutput?: Uint32Array): VerificationResult {
+    if (!this.inner) return failure("verifier has been freed");
+    if (!(handle instanceof Handle) || !handle.proof) return failure("proof handle has been freed");
+    try {
+      const result = this.inner.verifyProof(handle.proof, expectedOutput);
+      const output = { success: result.success, error: result.error() ?? null, publicOutput: result.publicOutput ?? null };
+      result.free();
+      return output;
+    } catch (error) {
+      return failure(error);
+    }
+  }
+
+  free(): void {
+    this.inner?.free();
+    this.inner = undefined;
   }
 }
 
-function createWasmVerifier(options: VerifierOptions): WasmVerifier {
-  if (options.verificationKey) {
-    return WasmVerifier.fromKey(options.verificationKey);
+/** Create a verifier for a trusted v3 key. */
+export async function createVerifier(options: VerifierOptions): Promise<Verifier> {
+  if (!options || "setupBin" in options || "layoutBin" in options) {
+    throw new Error("legacy split keys are not supported; supply verificationKey (EVKEY001 v2)");
   }
-
-  if (options.setupBin && options.layoutBin) {
-    return WasmVerifier.fromLegacyKey(options.setupBin, options.layoutBin);
+  if (!(options.verificationKey instanceof Uint8Array)) {
+    throw new Error("verificationKey must be a Uint8Array containing an EVKEY001 v2 key");
   }
-
-  throw new Error(
-    "verifier options must include a verification key or legacy setup/layout artifacts"
-  );
+  return new VerifierImpl(options.verificationKey);
 }
 
 /**
- * Initializes the WASM dependency and creates a Verifier instance.
- * 
- * @param options Verifier configuration with an explicit key or legacy artifacts.
- * @returns A Promise that resolves to a Verifier instance.
+ * Synchronous one-shot verification for callers with a `verify_stark(proof, vk)` contract,
+ * such as EthProofs. Returns whether the gzip EPROOF01 v2 proof verifies against the
+ * EVKEY001 v2 key; malformed keys or proofs throw.
  */
-export async function createVerifier(options: VerifierOptions): Promise<Verifier> {
-  await ensureInit();
-
-  if (!options) {
-    throw new Error(
-      "verifier options must include a verification key or legacy setup/layout artifacts"
-    );
+export function verify_stark(proofBytes: Uint8Array, verificationKey: Uint8Array): boolean {
+  const verifier = new VerifierImpl(verificationKey);
+  try {
+    const handle = verifier.deserializeProofBytes(proofBytes);
+    try {
+      return verifier.verifyProof(handle).success;
+    } finally {
+      handle.free();
+    }
+  } finally {
+    verifier.free();
   }
-
-  return new VerifierImpl(createWasmVerifier(options));
 }

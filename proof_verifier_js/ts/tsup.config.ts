@@ -4,5 +4,5 @@ export default defineConfig({
   entry: ["src/index.ts"],
   format: ["esm"],
   dts: true,
-  external: ["../wasm/pkg/proof_verifier_wasm"]
+  external: ["../wasm/pkg/proof_verifier_wasm.js"]
 });

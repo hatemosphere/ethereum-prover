@@ -121,6 +121,9 @@ jobs:
         with:
           ref: ${{ inputs.tag }}
 
+      - name: Checkout v3 stack
+        uses: ./.github/actions/checkout-stack
+
       - name: Install Rust toolchain
         uses: moonrepo/setup-rust@ede6de059f8046a5e236c94046823e2af11ca670 # v1.2.2
         with:
@@ -164,6 +167,9 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           ref: ${{ inputs.tag }}
+
+      - name: Checkout v3 stack
+        uses: ./.github/actions/checkout-stack
 
       - name: Build and push Docker image
         uses: ./.github/actions/publish-docker-image

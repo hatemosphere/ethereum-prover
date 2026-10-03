@@ -1,32 +1,58 @@
-use crate::types::ProofSecurity;
-
 pub(crate) const VERIFICATION_KEY_MAGIC: [u8; 8] = *b"EVKEY001";
-const VERIFICATION_KEY_FORMAT_VERSION: u8 = 1;
+const VERIFICATION_KEY_FORMAT_VERSION: u8 = 2;
+const VERIFICATION_KEY_SECURITY: u8 = 100;
 
+/// Version 2 binds proofs to one guest program: a proof is accepted only if the recursion
+/// chain hash its final verifier outputs equals one of `expected_chain_hashes` (zero, one,
+/// or two and more unrolled recursion layers). The app hashes identify the guest.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct EncodedVerificationKey<Setup, Layouts> {
+struct EncodedVerificationKey {
     magic: [u8; 8],
     version: u8,
     security: u8,
-    setup: Setup,
-    layouts: Layouts,
+    app_bin_keccak: [u8; 32],
+    app_text_keccak: [u8; 32],
+    expected_chain_hashes: [[u32; 8]; 3],
 }
 
-pub(crate) fn encode_verification_key<Setup: serde::Serialize, Layouts: serde::Serialize>(
-    setup: Setup,
-    layouts: Layouts,
-    security: ProofSecurity,
+pub(crate) struct VerificationKey {
+    pub expected_chain_hashes: [[u32; 8]; 3],
+}
+
+pub(crate) fn decode_verification_key(bytes: &[u8]) -> anyhow::Result<VerificationKey> {
+    anyhow::ensure!(
+        bytes.len() >= 10 && bytes[..8] == VERIFICATION_KEY_MAGIC,
+        "not an EthProofs verification key"
+    );
+    anyhow::ensure!(
+        bytes[8] == VERIFICATION_KEY_FORMAT_VERSION && bytes[9] == VERIFICATION_KEY_SECURITY,
+        "unsupported verification key version {} / security {}",
+        bytes[8],
+        bytes[9]
+    );
+    let (decoded, read): (EncodedVerificationKey, usize) =
+        bincode::serde::decode_from_slice(bytes, bincode::config::standard())?;
+    anyhow::ensure!(
+        read == bytes.len(),
+        "trailing bytes after the verification key"
+    );
+    Ok(VerificationKey {
+        expected_chain_hashes: decoded.expected_chain_hashes,
+    })
+}
+
+pub(crate) fn encode_verification_key(
+    app_bin_keccak: [u8; 32],
+    app_text_keccak: [u8; 32],
+    expected_chain_hashes: [[u32; 8]; 3],
 ) -> Result<Vec<u8>, bincode::error::EncodeError> {
-    // The canonical VK payload keeps Airbender's setup/layout split as internal
-    // fields, but callers handle one opaque artifact. The magic/version prefix
-    // lets verifiers reject legacy split files and future incompatible formats
-    // with a clear error instead of attempting to deserialize them as setup data.
     let encoded = EncodedVerificationKey {
         magic: VERIFICATION_KEY_MAGIC,
         version: VERIFICATION_KEY_FORMAT_VERSION,
-        security: security.proof_wire_value(),
-        setup,
-        layouts,
+        security: VERIFICATION_KEY_SECURITY,
+        app_bin_keccak,
+        app_text_keccak,
+        expected_chain_hashes,
     };
     bincode::serde::encode_to_vec(&encoded, bincode::config::standard())
 }
@@ -35,31 +61,34 @@ pub(crate) fn encode_verification_key<Setup: serde::Serialize, Layouts: serde::S
 mod tests {
     use super::*;
 
-    const SECURITY_100_UNIT_KEY_HEX: &str =
-        include_str!("../../test_fixtures/verification_key_format/security_100_unit_key.hex");
-
     #[test]
-    fn encoded_key_starts_with_magic() {
-        let encoded = EncodedVerificationKey {
-            magic: VERIFICATION_KEY_MAGIC,
-            version: VERIFICATION_KEY_FORMAT_VERSION,
-            security: ProofSecurity::Security100.proof_wire_value(),
-            setup: (),
-            layouts: (),
-        };
-
-        let bytes = bincode::serde::encode_to_vec(&encoded, bincode::config::standard())
-            .expect("encode test verification key");
-
-        assert!(bytes.starts_with(&VERIFICATION_KEY_MAGIC));
+    fn key_matches_golden_vector() {
+        let bytes = encode_verification_key([0x11; 32], [0x22; 32], [[1; 8], [300; 8], [0; 8]])
+            .expect("encode verification key");
+        let expected = format!(
+            "{}{}{}{}{}{}",
+            "45564b4559303031", // magic
+            "0264",             // version 2, security 100
+            "11".repeat(32),
+            "22".repeat(32),
+            "01".repeat(8) + &"fb2c01".repeat(8),
+            "00".repeat(8),
+        );
+        assert_eq!(to_hex(&bytes), expected);
     }
 
     #[test]
-    fn security_100_unit_key_matches_golden_vector() {
-        let bytes = encode_verification_key((), (), ProofSecurity::Security100)
-            .expect("encode unit verification key");
-
-        assert_eq!(to_hex(&bytes), SECURITY_100_UNIT_KEY_HEX.trim());
+    fn key_round_trips() {
+        let hashes = [[1, 2, 3, 4, 5, 6, 7, 8], [9; 8], [u32::MAX; 8]];
+        let bytes = encode_verification_key([1; 32], [2; 32], hashes).expect("encode key");
+        let (decoded, read): (EncodedVerificationKey, usize) =
+            bincode::serde::decode_from_slice(&bytes, bincode::config::standard())
+                .expect("decode key");
+        assert_eq!(read, bytes.len());
+        assert_eq!(decoded.magic, VERIFICATION_KEY_MAGIC);
+        assert_eq!(decoded.version, VERIFICATION_KEY_FORMAT_VERSION);
+        assert_eq!(decoded.security, VERIFICATION_KEY_SECURITY);
+        assert_eq!(decoded.expected_chain_hashes, hashes);
     }
 
     fn to_hex(bytes: &[u8]) -> String {

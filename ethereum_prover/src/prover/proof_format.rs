@@ -1,72 +1,106 @@
-use execution_utils::unrolled::UnrolledProgramProof;
-
-use crate::types::ProofSecurity;
+use airbender_host::{Proof, ProverLevel, raw::ProofArtifact};
+use full_statement_verifier::host_utils::build_unified_stream;
 
 pub(crate) const PROOF_MAGIC: [u8; 8] = *b"EPROOF01";
-const PROOF_FORMAT_VERSION: u8 = 1;
+const PROOF_FORMAT_VERSION: u8 = 2;
+const PROOF_SECURITY: u8 = 100;
 
+/// Version 2 carries the word stream the final unified full-statement verifier consumes
+/// (`build_unified_stream` of the final recursion layer), not a native proof structure.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct EncodedProof<P> {
+struct EncodedProof {
     magic: [u8; 8],
     version: u8,
     security: u8,
-    proof: P,
+    proof_words: Vec<u32>,
 }
 
-fn encode_envelope<P: serde::Serialize>(
-    proof: P,
-    security: ProofSecurity,
-) -> Result<Vec<u8>, bincode::error::EncodeError> {
+pub(crate) fn encode_proof(proof: Proof) -> anyhow::Result<Vec<u8>> {
+    encode_artifact(&final_artifact(proof)?)
+}
+
+/// The native artifact of a final unified recursion proof.
+pub fn final_artifact(proof: Proof) -> anyhow::Result<ProofArtifact> {
+    let Proof::Real(proof) = proof else {
+        anyhow::bail!("only real proofs can be encoded for EthProofs");
+    };
+    anyhow::ensure!(
+        proof.level() == ProverLevel::RecursionUnified,
+        "only final unified recursion proofs can be encoded for EthProofs, got {:?}",
+        proof.level()
+    );
+    Ok(proof.into_inner())
+}
+
+pub fn encode_artifact(artifact: &ProofArtifact) -> anyhow::Result<Vec<u8>> {
+    let proof_words = build_unified_stream(&artifact.setups, &artifact.proof);
+    Ok(encode_envelope(proof_words)?)
+}
+
+/// Decodes an uncompressed envelope: the fixed prefix is checked before the body, and the
+/// bytes must be consumed exactly.
+pub fn decode_proof_words(bytes: &[u8]) -> anyhow::Result<Vec<u32>> {
+    anyhow::ensure!(
+        bytes.len() >= 10 && bytes[..8] == PROOF_MAGIC,
+        "not an EthProofs proof envelope"
+    );
+    anyhow::ensure!(
+        bytes[8] == PROOF_FORMAT_VERSION,
+        "unsupported proof envelope version {} (expected {PROOF_FORMAT_VERSION})",
+        bytes[8]
+    );
+    anyhow::ensure!(
+        bytes[9] == PROOF_SECURITY,
+        "unsupported proof security {} (expected {PROOF_SECURITY})",
+        bytes[9]
+    );
+    let (decoded, read): (EncodedProof, usize) =
+        bincode::serde::decode_from_slice(bytes, bincode::config::standard())?;
+    anyhow::ensure!(
+        read == bytes.len(),
+        "trailing bytes after the proof envelope"
+    );
+    Ok(decoded.proof_words)
+}
+
+fn encode_envelope(proof_words: Vec<u32>) -> Result<Vec<u8>, bincode::error::EncodeError> {
     // The outer EthProofs transport still handles gzip + base64. This envelope
     // is only the inner bincode payload, and starts with a fixed magic so
     // verifiers can distinguish it from legacy raw Airbender proofs.
     let encoded = EncodedProof {
         magic: PROOF_MAGIC,
         version: PROOF_FORMAT_VERSION,
-        security: security.proof_wire_value(),
-        proof,
+        security: PROOF_SECURITY,
+        proof_words,
     };
     bincode::serde::encode_to_vec(&encoded, bincode::config::standard())
-}
-
-pub(crate) fn encode_proof(
-    proof: UnrolledProgramProof,
-    security: ProofSecurity,
-) -> Result<Vec<u8>, bincode::error::EncodeError> {
-    encode_envelope(proof, security)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const SECURITY_100_UNIT_ENVELOPE_HEX: &str =
-        include_str!("../../../test_fixtures/proof_format/security_100_unit_envelope.hex");
+    // Magic, version 2, security 100, then three words: 1, 300 and u32::MAX cover the
+    // one-, three- and five-byte varint forms.
+    const THREE_WORD_ENVELOPE_HEX: &str = "4550524f4f46303102640301fb2c01fcffffffff";
 
     #[test]
-    fn encoded_payload_starts_with_magic() {
-        let encoded = EncodedProof {
-            magic: PROOF_MAGIC,
-            version: PROOF_FORMAT_VERSION,
-            security: ProofSecurity::Security100.proof_wire_value(),
-            proof: (),
-        };
-
-        let bytes = bincode::serde::encode_to_vec(&encoded, bincode::config::standard())
-            .expect("encode test envelope");
-
-        assert!(bytes.starts_with(&PROOF_MAGIC));
+    fn envelope_matches_golden_vector() {
+        let bytes = encode_envelope(vec![1, 300, u32::MAX]).expect("encode envelope");
+        assert_eq!(to_hex(&bytes), THREE_WORD_ENVELOPE_HEX);
     }
 
     #[test]
-    fn security_100_unit_envelope_matches_golden_vector() {
-        // The proof field is intentionally `()` here. The contract under test is
-        // the shallow envelope shared with proof_verifier_js, not Airbender's
-        // internal proof schema or verifier semantics.
-        let bytes =
-            encode_envelope((), ProofSecurity::Security100).expect("encode unit proof envelope");
-
-        assert_eq!(to_hex(&bytes), SECURITY_100_UNIT_ENVELOPE_HEX.trim());
+    fn envelope_round_trips() {
+        let bytes = encode_envelope(vec![7, 8, 9]).expect("encode envelope");
+        let (decoded, read): (EncodedProof, usize) =
+            bincode::serde::decode_from_slice(&bytes, bincode::config::standard())
+                .expect("decode envelope");
+        assert_eq!(read, bytes.len());
+        assert_eq!(decoded.magic, PROOF_MAGIC);
+        assert_eq!(decoded.version, PROOF_FORMAT_VERSION);
+        assert_eq!(decoded.security, PROOF_SECURITY);
+        assert_eq!(decoded.proof_words, vec![7, 8, 9]);
     }
 
     fn to_hex(bytes: &[u8]) -> String {

@@ -22,11 +22,19 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     if let Command::GenerateVerifierArtifacts {
         output_dir,
+        app_dir,
         security,
     } = &cli.command
     {
-        verifier_artifacts::generate_verifier_artifacts(output_dir, *security)
+        verifier_artifacts::generate_verifier_artifacts(output_dir, app_dir, *security)
             .context("failed to generate verifier artifacts")?;
+        return Ok(());
+    }
+
+    if let Command::Verify { proof, key } = &cli.command {
+        let output = ethereum_prover::verification::verify_proof_file(proof, key)
+            .context("verification failed")?;
+        println!("verified; public output {output:08x?}");
         return Ok(());
     }
 

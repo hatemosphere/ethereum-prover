@@ -45,7 +45,7 @@ runs:
         if command -v sudo >/dev/null 2>&1; then
           SUDO=sudo
         fi
-        ${SUDO} apt update && ${SUDO} apt install -y libclang-dev wget jq libssl-dev pkg-config
+        ${SUDO} apt update && ${SUDO} apt install -y clang libclang-dev wget jq libssl-dev pkg-config
 
     - name: Add cuda to path
       shell: 'bash -ex {0}'
@@ -111,7 +111,7 @@ runs:
         GITHUB_TOKEN: ${{ github.token }}
       with:
         inherit-toolchain: true
-        components: 'rustfmt,clippy'
+        components: 'rustfmt,clippy,rust-src,llvm-tools-preview'
         bins: 'cargo-nextest,cargo-llvm-cov'
         cache: false
 
