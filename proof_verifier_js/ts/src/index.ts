@@ -1,4 +1,5 @@
 import createBindings from "../wasm/pkg/proof_verifier_wasm.js";
+import { loadWasmBytes } from "./load-wasm";
 
 /** Opaque proof owned by the verifier that deserialized it. */
 export type ProofHandle = { free(): void };
@@ -37,20 +38,8 @@ type HandleState = {
   inner: ReturnType<Bindings["deserialize_proof_bytes"]>;
 };
 
-async function loadModule(): Promise<WebAssembly.Module> {
-  const url = new URL("../wasm/pkg/proof_verifier_wasm_bg.wasm", import.meta.url);
-  if (url.protocol === "file:") {
-    // Bundlers must not resolve this Node-only import for browser builds.
-    const { readFile } = await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ "fs/promises");
-    return WebAssembly.compile(await readFile(url));
-  }
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`WASM download failed: ${response.status}`);
-  return WebAssembly.compile(await response.arrayBuffer());
-}
-
 // Compiled once when the package is imported, so instances can be created synchronously.
-const wasmModule = await loadModule();
+const wasmModule = await WebAssembly.compile(await loadWasmBytes());
 
 function failure(error: unknown) {
   return {
