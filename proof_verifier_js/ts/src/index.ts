@@ -37,18 +37,20 @@ type HandleState = {
   inner: ReturnType<Bindings["deserialize_proof_bytes"]>;
 };
 
-let modulePromise: Promise<WebAssembly.Module> | undefined;
-
 async function loadModule(): Promise<WebAssembly.Module> {
   const url = new URL("../wasm/pkg/proof_verifier_wasm_bg.wasm", import.meta.url);
   if (url.protocol === "file:") {
-    const { readFile } = await import("node:fs/promises");
+    // Bundlers must not resolve this Node-only import for browser builds.
+    const { readFile } = await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ "fs/promises");
     return WebAssembly.compile(await readFile(url));
   }
   const response = await fetch(url);
   if (!response.ok) throw new Error(`WASM download failed: ${response.status}`);
   return WebAssembly.compile(await response.arrayBuffer());
 }
+
+// Compiled once when the package is imported, so instances can be created synchronously.
+const wasmModule = await loadModule();
 
 function failure(error: unknown) {
   return {
@@ -135,7 +137,7 @@ class VerifierImpl implements Verifier {
   }
 }
 
-/** Compile WASM once and create an isolated verifier with a trusted v3 key. */
+/** Create an isolated verifier with a trusted v3 key (the WASM module is compiled at import). */
 export async function createVerifier(options: VerifierOptions): Promise<Verifier> {
   if (!options || "setupBin" in options || "layoutBin" in options) {
     throw new Error("legacy split keys are not supported; supply verificationKey (EVKEY001 v2)");
@@ -143,7 +145,24 @@ export async function createVerifier(options: VerifierOptions): Promise<Verifier
   if (!(options.verificationKey instanceof Uint8Array)) {
     throw new Error("verificationKey must be a Uint8Array containing an EVKEY001 v2 key");
   }
-  const key = new Uint8Array(options.verificationKey);
-  modulePromise ??= loadModule().catch(error => { modulePromise = undefined; throw error; });
-  return new VerifierImpl(await modulePromise, key);
+  return new VerifierImpl(wasmModule, new Uint8Array(options.verificationKey));
+}
+
+/**
+ * Synchronous one-shot verification for callers with a `verify_stark(proof, vk)` contract,
+ * such as EthProofs. Returns whether the gzip EPROOF01 v2 proof verifies against the
+ * EVKEY001 v2 key; malformed keys or proofs throw. Each call uses a fresh WASM instance.
+ */
+export function verify_stark(proofBytes: Uint8Array, verificationKey: Uint8Array): boolean {
+  const verifier = new VerifierImpl(wasmModule, new Uint8Array(verificationKey));
+  try {
+    const handle = verifier.deserializeProofBytes(proofBytes);
+    try {
+      return verifier.verifyProof(handle).success;
+    } finally {
+      handle.free();
+    }
+  } finally {
+    verifier.free();
+  }
 }

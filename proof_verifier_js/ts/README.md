@@ -1,6 +1,6 @@
 # Airbender v3 proof verifier for EthProofs
 
-Version 1.0.0 verifies gzip-compressed `EPROOF01` v2 proofs at security 100.
+Version 1.1.0 verifies gzip-compressed `EPROOF01` v2 proofs at security 100.
 It bundles the WASM verifier and supports browsers and Node.js through an ESM API.
 Supply the trusted `recursion_unified_v3_security_100.vk.bin` key for the producing
 Ethereum STF guest. Keys use `EVKEY001` v2 and bind the permitted recursion chains.
@@ -28,6 +28,17 @@ try {
   verifier.free();
 }
 ```
+
+For a `verify_stark(proof, vk)` contract, such as EthProofs, use the synchronous
+one-shot helper. It returns whether the proof verifies; malformed keys or proofs throw.
+
+```ts
+import { verify_stark } from "@matterlabs/ethproofs-airbender-verifier";
+
+const isValid = verify_stark(proofBytes, verificationKey);
+```
+
+The WASM module is compiled when the package is imported (top-level await).
 
 `createVerifier({verificationKey})` is asynchronous; `deserializeProofBytes` and
 `verifyProof` remain synchronous. `verifyProof(handle, expectedOutput?)` returns
@@ -64,7 +75,7 @@ Builds require the repository Rust toolchain, the `wasm32-unknown-unknown` targe
 `wasm-pack`, and the sibling v3 airbender checkout. The package test loads its
 built public entry point and checks the three real proofs (26078427, 26078503,
 26078715) against native outputs, wrong keys, corruption, output checks, handle
-ownership, and repeated trap recovery. See [the WASM tests](../wasm/README.md) for
+ownership, and repeated trap recovery. See the WASM crate's tests in [matter-labs/ethereum-prover](https://github.com/matter-labs/ethereum-prover/tree/main/proof_verifier_js/wasm) for
 the fixture layout and native reference provenance.
 
 ## License

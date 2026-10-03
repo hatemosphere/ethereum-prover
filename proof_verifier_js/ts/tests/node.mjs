@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { gzipSync, gunzipSync } from "node:zlib";
-import { createVerifier } from "@matterlabs/ethproofs-airbender-verifier";
+import { createVerifier, verify_stark } from "@matterlabs/ethproofs-airbender-verifier";
 
 const fixtures = process.argv[2] ?? process.env.V3_VERIFIER_FIXTURES;
 assert(fixtures, "usage: yarn test FIXTURE_DIR (or set V3_VERIFIER_FIXTURES)");
@@ -68,6 +68,10 @@ for (const block of blocks) {
   handle.free();
 }
 wrongVerifier.free();
+for (const block of blocks) {
+  check(`${block}: verify_stark`, () => assert.equal(verify_stark(proofs[block], key), true));
+  check(`${block}: verify_stark wrong key`, () => assert.equal(verify_stark(proofs[block], wrongKey), false));
+}
 
 const wrongZeroKey = Buffer.from(key); wrongZeroKey[75] ^= 1;
 const shapeVerifier = await createVerifier({ verificationKey: wrongZeroKey });
