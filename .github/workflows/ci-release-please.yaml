@@ -30,13 +30,65 @@ jobs:
       config: '.github/release-please/config.json' # Specify the path to the configuration file
       manifest: '.github/release-please/manifest.json' # Specify the path to the manifest file
       upgrade-dependencies: false # Do not upgrade workspace dependencies
-      update-cargo-lock: true
+      # The shared job checks out only this repo; Cargo path dependencies need the v3 stack.
+      update-cargo-lock: false
       publish-to-crates-io: false
       notify-slack: false
 
-  # Publish all release artifacts for the shared repo version.
+  # Same as the shared job, plus the v3 stack checkout that `cargo metadata` needs.
+  update-cargo-lock:
+    name: Update Cargo.lock
+    runs-on: ubuntu-latest
+    needs: release-please
+    if: ${{ needs.release-please.outputs.prs_created == 'true' }}
+    strategy:
+      matrix:
+        pr_branch: ${{ fromJson(needs.release-please.outputs.prs).*.headBranchName }}
+      fail-fast: false
+    steps:
+      - name: Generate GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.MATTERLABS_BOTS_APP_ID }}
+          private-key: ${{ secrets.MATTERLABS_BOTS_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          ref: ${{ matrix.pr_branch }}
+          token: ${{ steps.app_token.outputs.token }}
+          submodules: recursive
+
+      - name: Checkout v3 stack
+        uses: ./.github/actions/checkout-stack
+
+      - name: Install Rust toolchain
+        uses: moonrepo/setup-rust@ede6de059f8046a5e236c94046823e2af11ca670 # v1.2.2
+        with:
+          inherit-toolchain: true
+          cache: false
+
+      - name: Update Cargo.lock
+        id: update
+        run: |
+          cargo update --workspace
+          echo "changed=$(git diff --quiet && echo false || echo true)" >> "${GITHUB_OUTPUT}"
+
+      # Commits through the GitHub API, so the commit is signed by GitHub.
+      - name: Commit Cargo.lock changes
+        if: ${{ steps.update.outputs.changed == 'true' }}
+        uses: planetscale/ghcommit-action@a6b150b81dca5dd027baa898604418eec9e11465 # v0.2.22
+        with:
+          commit_message: 'chore: update Cargo.lock'
+          repo: ${{ github.repository }}
+          branch: ${{ matrix.pr_branch }}
+        env:
+          GITHUB_TOKEN: ${{ steps.app_token.outputs.token }}
+
+  # Publish the prover release artifacts (root package).
   release-artifacts:
-    if: ${{ always() && needs.release-please.outputs.releases_created == 'true' }}
+    if: ${{ always() && fromJSON(needs.release-please.outputs.all).release_created == 'true' }}
     needs: release-please
     # Reusable workflows cannot elevate GITHUB_TOKEN permissions on their own.
     # Grant the scopes that ci-release.yaml needs to update releases, publish to
@@ -48,7 +100,24 @@ jobs:
     uses: ./.github/workflows/ci-release.yaml
     with:
       tag: ${{ needs.release-please.outputs.tag_name }}
-      skip_npm_publish: true # Publishing is tied to the workflow file name, so we can't call it via workflow call
+      skip_npm_publish: true
       upload_prover_bundle: true
       push_docker_image: true
+    secrets: inherit
+
+  # Publish the verifier package to npm when its own component is released.
+  # npm trusted publishing matches the calling workflow, so the trusted publisher
+  # on npmjs.com must name this file (ci-release-please.yaml).
+  publish-verifier:
+    if: ${{ always() && fromJSON(needs.release-please.outputs.all)['proof_verifier_js--release_created'] == 'true' }}
+    needs: release-please
+    permissions:
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/ci-release.yaml
+    with:
+      tag: ${{ fromJSON(needs.release-please.outputs.all)['proof_verifier_js--tag_name'] }}
+      skip_npm_publish: false
+      upload_prover_bundle: false
+      push_docker_image: false
     secrets: inherit

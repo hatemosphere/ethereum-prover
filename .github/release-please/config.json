@@ -7,15 +7,22 @@
     "packages": {
         ".": {
             "component": "ethereum-prover",
+            "exclude-paths": ["proof_verifier_js"],
             "extra-files": [
                 {
                     "type": "toml",
                     "path": "Cargo.toml",
                     "jsonpath": "$.workspace.package.version"
-                },
+                }
+            ]
+        },
+        "proof_verifier_js": {
+            "component": "ethproofs-airbender-verifier",
+            "include-component-in-tag": true,
+            "extra-files": [
                 {
                     "type": "json",
-                    "path": "proof_verifier_js/ts/package.json",
+                    "path": "ts/package.json",
                     "jsonpath": "$.version"
                 }
             ]
