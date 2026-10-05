@@ -3,7 +3,7 @@
     "bump-patch-for-minor-pre-major": true,
     "release-type": "simple",
     "include-component-in-tag": false,
-    "group-pull-request-title-pattern": "chore: release${component} ${version}",
+    "separate-pull-requests": true,
     "packages": {
         ".": {
             "component": "ethereum-prover",
