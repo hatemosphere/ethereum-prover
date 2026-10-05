@@ -111,9 +111,12 @@ jobs:
   publish-verifier:
     if: ${{ always() && fromJSON(needs.release-please.outputs.all)['proof_verifier_js--release_created'] == 'true' }}
     needs: release-please
+    # ci-release.yaml's image job declares packages: write; callers must grant every
+    # permission a called workflow requests, even for jobs that end up skipped.
     permissions:
       contents: write
       id-token: write
+      packages: write
     uses: ./.github/workflows/ci-release.yaml
     with:
       tag: ${{ fromJSON(needs.release-please.outputs.all)['proof_verifier_js--tag_name'] }}
